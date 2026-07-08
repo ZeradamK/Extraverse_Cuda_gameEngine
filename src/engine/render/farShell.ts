@@ -20,7 +20,7 @@ export class FarShell {
   private sunMesh!: THREE.Mesh;
   private loader = new THREE.TextureLoader();
 
-  constructor(bodies: BodyState[]) {
+  constructor(bodies: BodyState[], private geoOverrides: Map<string, THREE.BufferGeometry> = new Map()) {
     this.group.renderOrder = -1;
     for (const b of bodies) {
       const g = b.kind === 'star' ? this.buildSun(b) : this.buildBody(b);
@@ -91,7 +91,9 @@ export class FarShell {
       roughness: 1.0,
       metalness: 0.0,
     });
-    const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), mat);
+    // user-authored geometry when provided (photoreal_earth / moon gltfs)
+    const geo = this.geoOverrides.get(b.name) ?? new THREE.SphereGeometry(1, 48, 24);
+    const sphere = new THREE.Mesh(geo, mat);
     sphere.rotation.order = 'ZXY';
     g.add(sphere);
 
