@@ -343,6 +343,13 @@ export class PlanetTerrain {
     }
   }
 
+  dispose(): void {
+    for (const w of this.workers) w.terminate();
+    for (const m of this.meshes.values()) m.geometry.dispose();
+    this.meshes.clear();
+    this.group.removeFromParent();
+  }
+
   get stats(): { patches: number; inflight: number } {
     return { patches: this.meshes.size, inflight: this.inflight.size };
   }

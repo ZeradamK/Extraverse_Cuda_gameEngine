@@ -5,7 +5,13 @@
  * States: IDLE → SPOOL (3 s, must hold alignment) → WARP → drop (auto or manual).
  */
 import * as THREE from 'three';
-import type { SolSystem, BodyState } from './solSystem';
+import type { BodyState } from './solSystem';
+
+/** minimal system surface the drive needs (SolSystem or ProcSystem) */
+export interface WarpSystem {
+  bodies: BodyState[];
+  planets: BodyState[];
+}
 import type { ShipFlight } from './flight';
 
 const T_BRAKE = 5;            // s — Elite's rule is ~7; 5 tightens well climb-out (~90 s Earth→Mars)
@@ -30,7 +36,13 @@ export class WarpDrive {
 
   private tmp = new THREE.Vector3();
 
-  constructor(private sys: SolSystem, private flight: ShipFlight) {}
+  constructor(private sys: WarpSystem, private flight: ShipFlight) {}
+
+  /** hyperjump swaps the star system (M8) */
+  setSystem(s: WarpSystem): void {
+    this.sys = s;
+    this.target = null;
+  }
 
   cycleTarget(): void {
     // planets + major moons are warp/nav targets
