@@ -1,0 +1,12 @@
+booted
+target: Luna
+spool: SPOOL
+wait 0: warp=WARP fps=60
+wait 5: warp=WARP fps=60
+wait 10: warp=WARP fps=60
+wait 15: warp=WARP fps=60
+wait 20: warp=WARP fps=60
+wait 25: warp=WARP fps=60
+arrived
+done: Luna 345.4 km · sun 1.02 AU · eclipse 0.00
+BROWSER DIED

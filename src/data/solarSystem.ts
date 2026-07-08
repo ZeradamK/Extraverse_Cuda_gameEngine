@@ -73,7 +73,7 @@ export const PLANETS: PlanetDef[] = [
     atmo: { rho0: 1.225, H: 8500, betaR: [5.8e-6, 13.5e-6, 33.1e-6], betaMSca: 4.0e-6, betaMExt: 4.44e-6, HM: 1200, g: 0.8, topM: 70_000 },
     moons: [
       { name: 'Luna', radiusKm: 1737.4, gmKm3S2: 4902.8, aKm: 384_400, periodDays: 27.3217, phase0: 1.2, inclDeg: 5.145,
-        color: 0xbdbdbd, texture: '/textures/planets/8k_moon.jpg',
+        color: 0xbdbdbd, texture: '/textures/planets/2k_moon.jpg',
         // libration (the 'rotation wobble'): optical lon ±2e rad, lat ±6.68° (real values)
         librLonRad: 0.1098, librLatRad: 0.1166 },
     ] },
