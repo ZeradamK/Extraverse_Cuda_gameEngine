@@ -18,6 +18,9 @@ export interface MoonDef {
   inclDeg: number;
   color: number;        // no textures for most moons yet — tinted spheres
   texture?: string;
+  /** optical libration amplitudes (rad): lon ≈ 2e (orbital), lat ≈ axial tilt to orbit */
+  librLonRad?: number;
+  librLatRad?: number;
 }
 
 /** atmosphere (§8.3/§9.3) — real ρ0/H (meters, kg/m³); β in m⁻¹ at scaled radii */
@@ -63,14 +66,16 @@ export const PLANETS: PlanetDef[] = [
     texture: '/textures/planets/2k_venus_atmosphere.jpg', elements: el['Venus'], moons: [],
     atmo: { rho0: 65.0, H: 15_900, betaR: [3.0e-5, 2.2e-5, 1.0e-5], betaMSca: 2.0e-4, betaMExt: 4.0e-4, HM: 5000, g: 0.75, topM: 120_000 } },
   { name: 'Earth', radiusKm: 6371.0, gmKm3S2: 398_600.435, rotationHours: 23.9345, axialTiltDeg: 23.44,
-    texture: '/textures/planets/2k_earth_daymap.jpg',
-    emissiveNight: '/textures/planets/2k_earth_nightmap.jpg',
-    clouds: '/textures/planets/2k_earth_clouds.jpg',
+    texture: '/textures/planets/earth_day_4k.jpg',
+    emissiveNight: '/textures/planets/earth_night_4k.jpg',
+    clouds: '/textures/planets/earth_clouds_4k.jpg',
     elements: el['EM Bary'],
     atmo: { rho0: 1.225, H: 8500, betaR: [5.8e-6, 13.5e-6, 33.1e-6], betaMSca: 4.0e-6, betaMExt: 4.44e-6, HM: 1200, g: 0.8, topM: 70_000 },
     moons: [
       { name: 'Luna', radiusKm: 1737.4, gmKm3S2: 4902.8, aKm: 384_400, periodDays: 27.3217, phase0: 1.2, inclDeg: 5.145,
-        color: 0xbdbdbd, texture: '/textures/planets/2k_moon.jpg' },
+        color: 0xbdbdbd, texture: '/textures/planets/8k_moon.jpg',
+        // libration (the 'rotation wobble'): optical lon ±2e rad, lat ±6.68° (real values)
+        librLonRad: 0.1098, librLatRad: 0.1166 },
     ] },
   { name: 'Mars', radiusKm: 3389.5, gmKm3S2: 42_828.4, rotationHours: 24.6229, axialTiltDeg: 25.19,
     texture: '/textures/planets/2k_mars.jpg', elements: el['Mars'], moons: [],
