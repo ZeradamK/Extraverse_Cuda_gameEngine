@@ -25,6 +25,11 @@ export class Hud {
     window.addEventListener('resize', () => this.resize());
   }
 
+  /** photo mode: hide the whole HUD layer */
+  setHidden(hidden: boolean): void {
+    this.cv.style.display = hidden ? 'none' : 'block';
+  }
+
   private resize(): void {
     this.cv.width = window.innerWidth * devicePixelRatio;
     this.cv.height = window.innerHeight * devicePixelRatio;
