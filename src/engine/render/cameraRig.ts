@@ -29,7 +29,8 @@ export class CameraRig {
   private tmpE = new THREE.Euler();
 
   constructor(aspect: number) {
-    this.camera = new THREE.PerspectiveCamera(FOV.chase, aspect, 0.1, 5e4);
+    // far 1e7: whole planets visible from orbit; reversed-Z keeps depth clean
+    this.camera = new THREE.PerspectiveCamera(FOV.chase, aspect, 0.1, 1e7);
   }
 
   toggle(): void {

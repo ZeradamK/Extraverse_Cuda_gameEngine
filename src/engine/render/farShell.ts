@@ -114,10 +114,20 @@ export class FarShell {
     return g;
   }
 
+  private hidden = new Set<BodyState>();
+
+  /** hide a body's proxy (its real terrain has taken over) */
+  setBodyVisible(b: BodyState, visible: boolean): void {
+    if (visible) this.hidden.delete(b);
+    else this.hidden.add(b);
+  }
+
   /** camPosM: camera position in world f64; per-frame */
   update(camPosM: Vec3d): void {
     const order: { g: THREE.Group; d: number }[] = [];
     for (const [b, g] of this.proxies) {
+      g.visible = !this.hidden.has(b);
+      if (!g.visible) continue;
       const dx = b.posM.x - camPosM.x;
       const dy = b.posM.y - camPosM.y;
       const dz = b.posM.z - camPosM.z;
