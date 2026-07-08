@@ -23,13 +23,12 @@ describe('mulberry32 (FROZEN — galaxy determinism depends on it)', () => {
     expect(sum / 10_000).toBeGreaterThan(0.47);
     expect(sum / 10_000).toBeLessThan(0.53);
   });
-  it('golden values are frozen (regression pin)', () => {
+  it('golden values are frozen (regression pin — REAL literals)', () => {
     const r = mulberry32(20260706);
-    // pin the first three draws — if these ever change, saved galaxies break
-    const v = [r(), r(), r()];
-    expect(v).toEqual(v.map(x => x)); // self-consistent
-    const r2 = mulberry32(20260706);
-    expect([r2(), r2(), r2()]).toEqual(v);
+    // hard literals: if these ever change, every saved galaxy breaks
+    expect(r()).toBeCloseTo(0.6981992106884718, 15);
+    expect(r()).toBeCloseTo(0.43607783946208656, 15);
+    expect(r()).toBeCloseTo(0.4254737156443298, 15);
   });
 });
 

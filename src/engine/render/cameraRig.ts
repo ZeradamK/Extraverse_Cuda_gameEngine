@@ -5,9 +5,9 @@
 import * as THREE from 'three/webgpu';
 import { SHIP } from '../../data/constants';
 
-export type CamMode = 'cockpit' | 'chase';
+export type CamMode = 'cockpit' | 'chase' | 'explicit';
 
-const FOV = { cockpit: 60, chase: 55 };
+const FOV = { cockpit: 60, chase: 55, explicit: 70 };
 const BOOST_FOV_KICK = 15;
 const SHIP_LENGTH = 18;
 
@@ -34,7 +34,21 @@ export class CameraRig {
   }
 
   toggle(): void {
+    if (this.mode === 'explicit') return;
     this.mode = this.mode === 'chase' ? 'cockpit' : 'chase';
+  }
+
+  /** on-foot FPS: main supplies the exact eye pose each frame (fov 70) */
+  setExplicitPose(pos: THREE.Vector3, quat: THREE.Quaternion): void {
+    this.mode = 'explicit';
+    this.pos.copy(pos);
+    this.quat.copy(quat);
+    this.fovCurrent += (70 - this.fovCurrent) * 0.2;
+  }
+
+  /** leave explicit mode (back to ship cameras) */
+  clearExplicit(mode: 'cockpit' | 'chase' = 'chase'): void {
+    if (this.mode === 'explicit') this.mode = mode;
   }
 
   /**
@@ -45,7 +59,9 @@ export class CameraRig {
     this.t += dt;
     const k = (lambda: number) => 1 - Math.exp(-lambda * dt);
 
-    if (this.mode === 'cockpit') {
+    if (this.mode === 'explicit') {
+      // pose already set via setExplicitPose
+    } else if (this.mode === 'cockpit') {
       // rigid attach at pilot anchor
       this.tmpV.set(...SHIP.ANCHORS.cockpitCam).applyQuaternion(shipQuat).add(shipPos);
       this.pos.copy(this.tmpV);
