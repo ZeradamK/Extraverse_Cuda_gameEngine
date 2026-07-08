@@ -1,13 +1,22 @@
 /**
- * EXTRAVERSE — M0 Lookdev boot.
- * Acceptance gate (§17): ship renders with zero gray meshes, reactor blooms orange, 60 fps.
+ * EXTRAVERSE — M1 Flight.
+ * Fixed-timestep loop (§4.5) + IntentFrame input + 6DOF flight assist +
+ * cockpit/chase rig + throttle-driven exhaust + HUD v1.
+ * Acceptance (§17): flying feels like SC arena mode in an empty starfield.
  */
 import * as THREE from 'three/webgpu';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadShip } from './engine/assets/shipLoader';
 import { createPostFX } from './engine/render/postfx';
+import { CameraRig } from './engine/render/cameraRig';
+import { InputSystem } from './engine/core/input';
+import { ShipFlight } from './game/systems/flight';
+import { Exhaust } from './game/vfx/exhaust';
+import { createStarfield } from './game/vfx/starfield';
+import { Hud } from './ui/hud';
 import { SUN } from './data/constants';
+
+const DT = 1 / 60;
 
 const boot = document.getElementById('boot')!;
 const bootStatus = document.getElementById('boot-status')!;
@@ -38,73 +47,119 @@ async function init(): Promise<void> {
   const backend = (renderer.backend.constructor.name.includes('WebGPU')) ? 'WebGPU' : 'WebGL2 (fallback)';
 
   const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x020409);
 
-  // environment: dim night HDRI so PBR has something to reflect (galaxy skybox arrives in M2/M8)
   bootStatus.textContent = 'Loading environment…';
   const hdr = await new HDRLoader().loadAsync('/env/satara_night_no_lamps_2k.hdr');
   hdr.mapping = THREE.EquirectangularReflectionMapping;
-  scene.environment = hdr; // reflections only — background is deep space, not a golf course
+  scene.environment = hdr; // reflections only (galaxy skybox arrives M2/M8)
   scene.environmentIntensity = 0.9;
-  scene.background = new THREE.Color(0x030508);
 
-  // key light: the local star (physical scale comes later; lookdev value here)
+  // the local star — follows the ship so self-shadowing works anywhere
+  const sunOffset = new THREE.Vector3(350, 280, 400);
   const sun = new THREE.DirectionalLight(SUN.COLOR, 8.0);
-  sun.position.set(35, 28, 40); // key from aft-starboard high — lights the lookdev camera side
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = sun.shadow.camera.bottom = -25;
-  sun.shadow.camera.right = sun.shadow.camera.top = 25;
-  sun.shadow.camera.far = 150;
+  sun.shadow.camera.left = sun.shadow.camera.bottom = -30;
+  sun.shadow.camera.right = sun.shadow.camera.top = 30;
+  sun.shadow.camera.near = 100;
+  sun.shadow.camera.far = 1200;
   sun.shadow.bias = -2e-4;
-  scene.add(sun);
-  // cool fill from below-behind, sells the metal
-  const fill = new THREE.DirectionalLight(0x334a66, 0.6);
-  fill.position.set(-25, -12, -30);
-  scene.add(fill);
+  scene.add(sun, sun.target);
+  const fill = new THREE.DirectionalLight(0x334a66, 0.5);
+  scene.add(fill, fill.target);
 
-  // the ship
+  const stars = createStarfield();
+  scene.add(stars);
+
   bootStatus.textContent = 'Loading GRIDCORP drone…';
   const ship = await loadShip();
-  scene.add(ship.object);
+  const shipRoot = new THREE.Group(); // entity node: visual + exhaust, driven by sim
+  shipRoot.add(ship.object);
+  const exhaust = new Exhaust();
+  shipRoot.add(exhaust.group);
+  scene.add(shipRoot);
 
-  // camera + controls (lookdev turntable)
-  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 500);
-  camera.position.set(16, 7, 30); // aft three-quarter: engines + reactor in frame
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.minDistance = 8;
-  controls.maxDistance = 120;
+  const rig = new CameraRig(window.innerWidth / window.innerHeight);
+  const postfx = createPostFX(renderer, scene, rig.camera);
+  const input = new InputSystem(renderer.domElement);
+  const flight = new ShipFlight();
+  const hud = new Hud(document.body);
 
-  const postfx = createPostFX(renderer, scene, camera);
+  renderer.domElement.addEventListener('click', () => void input.lock());
 
   window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+    rig.camera.aspect = window.innerWidth / window.innerHeight;
+    rig.camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // loop: slow turntable + breathing throttle so the reactor/bloom reads
+  // --- fixed-timestep loop with render interpolation (§4.5) ---
+  let acc = 0;
+  let tick = 0;
   let last = performance.now();
   let fps = 60;
   let frames = 0;
+  const renderPos = new THREE.Vector3();
+  const renderQuat = new THREE.Quaternion();
+
   renderer.setAnimationLoop(() => {
     const now = performance.now();
-    const dt = (now - last) / 1000;
+    const dtReal = Math.min((now - last) / 1000, 0.25);
     last = now;
-    fps = fps * 0.95 + (1 / Math.max(dt, 1e-4)) * 0.05;
+    fps = fps * 0.95 + (1 / Math.max(dtReal, 1e-4)) * 0.05;
 
-    ship.object.rotation.y += dt * 0.15;
-    ship.setThrottle(0.5 + 0.5 * Math.sin(now / 1600));
+    acc += dtReal;
+    while (acc >= DT) {
+      const recenter = flight.flightAssist && !input.hasMouseInput;
+      const intent = input.sample(tick++, DT, recenter);
+      if (intent.pressed.has('camera.toggleChase')) rig.toggle();
+      flight.step(DT, intent);
+      acc -= DT;
+    }
 
-    controls.update();
+    // interpolate sim → render transform
+    const alpha = acc / DT;
+    renderPos.lerpVectors(flight.prev.pos, flight.curr.pos, alpha);
+    renderQuat.slerpQuaternions(flight.prev.quat, flight.curr.quat, alpha);
+    shipRoot.position.copy(renderPos);
+    shipRoot.quaternion.copy(renderQuat);
+
+    // visuals driven by sim
+    ship.setThrottle(flight.visualThrottle);
+    exhaust.update(flight.visualThrottle, flight.boosting);
+    if (flight.boosting) rig.trauma = Math.max(rig.trauma, 0.35);
+    stars.position.copy(rig.camera.position); // stars at infinity
+    sun.position.copy(renderPos).add(sunOffset);
+    sun.target.position.copy(renderPos);
+    fill.position.copy(renderPos).sub(sunOffset);
+    fill.target.position.copy(renderPos);
+
+    rig.update(dtReal, renderPos, renderQuat, flight.boosting);
     postfx.render();
 
+    hud.draw({
+      speed: flight.speed,
+      gForce: flight.gForce,
+      boostHeat: flight.boostHeat,
+      boosting: flight.boosting,
+      flightAssist: flight.flightAssist,
+      decoupled: flight.decoupled,
+      reticleX: input.reticleX,
+      reticleY: input.reticleY,
+      reticleRadius: input.reticleRadius,
+      vel: flight.curr.vel,
+      camera: rig.camera,
+      cockpit: rig.mode === 'cockpit',
+      locked: input.locked,
+    });
+
     if ((frames++ & 15) === 0) {
-      const r = renderer.info.render; // drawCalls/triangles are per-frame (info.autoReset)
+      const r = renderer.info.render;
       debugEl.textContent =
-        `EXTRAVERSE M0 lookdev · ${backend}\n` +
+        `EXTRAVERSE M1 flight · ${backend}\n` +
         `${fps.toFixed(0)} fps · ${r.drawCalls} draws · ${(r.triangles / 1000).toFixed(0)}k tris\n` +
-        `throttle ${(ship.throttle * 100).toFixed(0)}%`;
+        `pos ${renderPos.x.toFixed(0)},${renderPos.y.toFixed(0)},${renderPos.z.toFixed(0)} m`;
     }
   });
 
