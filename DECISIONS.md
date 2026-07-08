@@ -36,3 +36,12 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - **Earth night lights** are emissive on the whole sphere for now (day-side too); proper terminator day/night blend is the M6 Earth milestone.
 - **Physical sun falloff** (8/dAU²) makes the outer system authentically dim — Saturn at 9.5 AU gets 1% of Earth light. May add a small "gameplay ambient" floor later if legibility suffers.
 - Dev jumps: keys 1–8 teleport 6 radii sunward of each planet (spawn/testing only). F2 = system map (log-radial).
+
+## M3 — Warp (2026-07-06)
+
+- **Auto-align is mandatory**: first flight test warped along the nose vector while facing Earth → runaway to 6.6 AU (v_cap grows with target distance, so a miss accelerates forever). SPOOL now owns rotation (autopilot slerp to target, τ 0.35 s, entry gated on < 2° error) and WARP applies gentle track-hold (τ 2.5 s) under the player's reduced steering (×0.15).
+- **Trip time**: distance-slaved cap means the gravity-well climb-out dominates, not V_MAX — Earth→Mars measured **104 s** (spool + climb + 6e8 m/s cruise + auto-brake) with T_BRAKE 5 s, τ_accel 1.5 s. Spec's "30–75 s" assumed cap-dominated travel; the well-climb version feels more Elite-authentic. Tune T_BRAKE if faster is wanted.
+- **r185 bug found**: `chromaticAberration(node, strength)` crashes in node-build when `center` is left at its documented `null` default — pass `uniform(new Vector2(0.5, 0.5))` explicitly.
+- Warp tunnel = 500 additive LineSegments scrolling in a camera-space cylinder (CPU-updated, ~0 cost); CA strength = 0.65·factor².
+- During WARP the flight sim skips translation (warp owns pos/vel; HUD speed reads warp v); exit drops to 150 m/s forward drift (350 on emergency).
+- Verified end-to-end: G-cycle to Mars, B engage, auto-drop at 17 Mm / sun 1.45 AU, 0 console errors, 120 fps (scripts/verify-m3.mjs).
