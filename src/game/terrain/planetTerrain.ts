@@ -5,11 +5,25 @@
  * camera-relative each frame, rotated by the body's spin.
  */
 import * as THREE from 'three/webgpu';
-import { texture, triplanarTexture, float, color, positionLocal } from 'three/tsl';
+import {
+  atan, asin, color, float, normalWorld, positionLocal, positionWorld,
+  smoothstep, texture, triplanarTexture, uniform, vec2,
+} from 'three/tsl';
 import type { BodyState } from '../systems/solSystem';
 import type { Vec3d } from '../../engine/math/kepler';
 import type { PatchRequest, PatchResult } from '../../engine/workers/terrainWorker';
 import { createHeightField, type HeightField, type PlanetKind } from './heightfield';
+import type { LandMask } from './landMask';
+
+export interface TerrainOptions {
+  /** drape a real equirect day texture; optional night-lights emissive with terminator blend */
+  realDayTexture?: string;
+  realNightTexture?: string;
+  /** render an ocean sphere at datum radius (Earth) */
+  ocean?: boolean;
+  /** land mask for the heightfield + workers (Earth continents) */
+  mask?: LandMask;
+}
 
 const SPLIT_FACTOR = 2.2;
 const MAX_LEVEL = 12; // ~1.3 m cells (Luna) / 2.6 m (Mars) — fps > detail for hover heights
@@ -37,17 +51,28 @@ export class PlanetTerrain {
   private camLocal = new THREE.Vector3();
   private invSpin = new THREE.Quaternion();
 
+  /** scene-space planet center + sun dir + spin, fed to the shader per frame */
+  private uCenter = uniform(new THREE.Vector3());
+  private uSunDir = uniform(new THREE.Vector3(0, 1, 0));
+  private uSpin = uniform(0.0);
+  private ocean: THREE.Mesh | null = null;
+
   constructor(
     readonly body: BodyState,
     private kind: PlanetKind,
     private seed: number,
     tint: number,
+    private opts: TerrainOptions = {},
     workerCount = 2,
   ) {
-    this.heightField = createHeightField(kind, seed);
+    this.heightField = createHeightField(kind, seed, opts.mask);
     for (let i = 0; i < workerCount; i++) {
       const w = new Worker(new URL('../../engine/workers/terrainWorker.ts', import.meta.url), { type: 'module' });
       w.onmessage = (e: MessageEvent<PatchResult>) => this.onPatch(e.data);
+      if (opts.mask) {
+        // one-time mask init (copy per worker — buffers can't be shared post-transfer)
+        w.postMessage({ type: 'mask', data: opts.mask.data.slice(), w: opts.mask.w, h: opts.mask.h });
+      }
       this.workers.push(w);
     }
     const loader = new THREE.TextureLoader();
@@ -58,19 +83,67 @@ export class PlanetTerrain {
     rough.wrapS = rough.wrapT = THREE.RepeatWrapping;
     rough.colorSpace = THREE.NoColorSpace;
     this.material = new THREE.MeshStandardNodeMaterial({ metalness: 0 });
-    // dual-scale triplanar (patch-local space): macro breakup survives mips at
-    // orbit distance, detail carries the close-up. ~50% each.
+
+    // triplanar rock detail (patch-local space)
     const macro = triplanarTexture(texture(diff), null, null, float(1 / 700), positionLocal);
     const detail = triplanarTexture(texture(diff), null, null, float(1 / 9), positionLocal);
-    this.material.colorNode = macro.mul(detail).mul(2.0).mul(color(tint));
-    this.material.roughnessNode = triplanarTexture(texture(rough), null, null, float(1 / 9), positionLocal).r.max(0.65);
+    const rockColor = macro.mul(detail).mul(2.0).mul(color(tint));
+
+    if (opts.realDayTexture) {
+      // real equirect albedo draped by world direction (spin-corrected longitude)
+      const day = loader.load(opts.realDayTexture);
+      day.colorSpace = THREE.SRGBColorSpace;
+      day.wrapS = THREE.RepeatWrapping;
+      const dir = positionWorld.sub(this.uCenter).normalize();
+      const lon = atan(dir.z, dir.x.negate());
+      const lat = asin(dir.y.clamp(-1, 1));
+      const uvE = vec2(
+        lon.sub(this.uSpin).div(2 * Math.PI).add(0.5).fract(),
+        float(0.5).sub(lat.div(Math.PI)),
+      );
+      const albedo = texture(day, uvE);
+      // real color carries; rock detail modulates up close (patch-local freq)
+      this.material.colorNode = albedo.mul(detail.mul(0.65).add(0.68));
+      if (opts.realNightTexture) {
+        const night = loader.load(opts.realNightTexture);
+        night.colorSpace = THREE.SRGBColorSpace;
+        night.wrapS = THREE.RepeatWrapping;
+        // terminator blend (§8.4): lights only past the twilight band
+        const dayFactor = smoothstep(-0.12, 0.12, normalWorld.dot(this.uSunDir));
+        this.material.emissiveNode = texture(night, uvE).mul(float(1.0).sub(dayFactor)).mul(1.4);
+      }
+      this.material.roughnessNode = float(0.95);
+    } else {
+      this.material.colorNode = rockColor;
+      this.material.roughnessNode = triplanarTexture(texture(rough), null, null, float(1 / 9), positionLocal).r.max(0.65);
+    }
+
+    if (opts.ocean) {
+      // datum-radius water sphere: deep blue, tight specular for the sun glint
+      const oceanMat = new THREE.MeshStandardNodeMaterial({ metalness: 0.0 });
+      oceanMat.colorNode = color(0x06284a);
+      oceanMat.roughnessNode = float(0.12);
+      this.ocean = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), oceanMat);
+      this.ocean.scale.setScalar(body.radiusM);
+      this.ocean.receiveShadow = true;
+      this.group.add(this.ocean);
+    }
     this.group.visible = false;
+  }
+
+  /** per-frame shader inputs (scene space) — called by main after update() */
+  setShaderFrame(centerScene: THREE.Vector3, sunDir: THREE.Vector3): void {
+    (this.uCenter.value as THREE.Vector3).copy(centerScene);
+    (this.uSunDir.value as THREE.Vector3).copy(sunDir);
+    this.uSpin.value = this.body.spin;
   }
 
   /** height above datum at a world-frame unit direction (spin-corrected) — collision */
   surfaceRadiusAt(dirWorld: THREE.Vector3): number {
     const d = this.camLocal.copy(dirWorld).applyQuaternion(this.invSpin).normalize();
-    return this.body.radiusM + this.heightField.height(d);
+    const h = this.heightField.height(d);
+    // ocean worlds: you land on (or splash into) the water surface, not the seafloor
+    return this.body.radiusM + (this.opts.ocean ? Math.max(h, 0) : h);
   }
 
   /**
