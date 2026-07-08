@@ -174,6 +174,7 @@ export class FarShell {
       const sphere = g.children[0] as THREE.Mesh;
       sphere.rotation.z = b.axialTiltRad;
       sphere.rotation.y = b.spin;
+      sphere.rotation.x = b.wobble; // libration nod (tidally locked moons)
       const uSun = this.sunUniforms.get(b);
       if (uSun) {
         const l = Math.hypot(b.posM.x, b.posM.y, b.posM.z) || 1;
