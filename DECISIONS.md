@@ -26,3 +26,13 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - **Exhaust**: additive TSL cone plumes (MeshBasicNodeMaterial, opacityNode falloff + flicker) instead of GPU particles — particles arrive with warp VFX (M3). Plumes don't write the emissive MRT, so they don't bloom; the reactor/engine-frame emissives carry the bloom.
 - **Shadow while flying**: sun + shadow frustum follow the ship every frame (directional light target re-anchored to ship position).
 - Verification: `scripts/verify-m1.mjs` — thrust/boost/decouple/camera-toggle exercised headlessly; coupled cap ~252 m/s under boost decay, decoupled coast at 200 m/s & 0 G confirmed via HUD telemetry.
+
+## M2 — Sol on rails (2026-07-06)
+
+- **Far-shell instead of two-pass composite (deliberate §4.3 simplification)**: distant bodies are proxies projected to a fixed 9 km shell around the camera (`pos = dir·R`, `scale = R·radius/dist`, depthTest off, distance-sorted renderOrder). Perspectively identical to the far-scene pass but needs no second camera/clearDepth. The true two-pass split lands in M4 when quadtree terrain needs tight near/far planes.
+- **Ephemeris**: JPL approx_pos Table 1 (1800–2050) parsed from ssd.jpl.nasa.gov into `src/data/jpl-elements.json` (8 planets; Earth = EM Barycenter; Pluto omitted). Verified against reality: sun distances 1.02/5.27/9.47/29.88 AU at the 2026-07-06 epoch.
+- **f64 proof**: HUD shows f32 ULP at current |pos| — 32,768 m at Neptune (would be km-scale jitter naively); camera-relative rendering keeps the GPU in small numbers, renders are rock solid at 120 fps.
+- **Moons**: circular-orbit approximation (real a, period, inclination; seeded phase) — full elements not worth it until landings. Orbital periods kept REAL while distances are ×0.1, so moons sit deep inside parent SOI; revisit when patched-conics ship orbits arrive (M3+).
+- **Earth night lights** are emissive on the whole sphere for now (day-side too); proper terminator day/night blend is the M6 Earth milestone.
+- **Physical sun falloff** (8/dAU²) makes the outer system authentically dim — Saturn at 9.5 AU gets 1% of Earth light. May add a small "gameplay ambient" floor later if legibility suffers.
+- Dev jumps: keys 1–8 teleport 6 radii sunward of each planet (spawn/testing only). F2 = system map (log-radial).
