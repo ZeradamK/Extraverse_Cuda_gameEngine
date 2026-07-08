@@ -15,7 +15,17 @@ import { InputSystem } from './engine/core/input';
 import { ShipFlight } from './game/systems/flight';
 import { SolSystem } from './game/systems/solSystem';
 import { WarpDrive } from './game/systems/warpDrive';
+import { Autoland } from './game/systems/autoland';
+import {
+  density, dragAccel, dynamicPressure, gravityAccel, suttonGraves,
+  PLASMA_FULL_W_M2, PLASMA_START_W_M2,
+} from './game/systems/environment';
 import { PlanetTerrain } from './game/terrain/planetTerrain';
+import { AtmosphereShell } from './engine/render/atmosphere';
+import { LandingGear } from './game/vfx/landingGear';
+import { Dust } from './game/vfx/dust';
+import { ReentryGlow } from './game/vfx/reentryGlow';
+import type { PlanetDef } from './data/solarSystem';
 import { Exhaust } from './game/vfx/exhaust';
 import { WarpTunnel } from './game/vfx/warpTunnel';
 import { createStarfield } from './game/vfx/starfield';
@@ -78,6 +88,12 @@ async function init(): Promise<void> {
   ];
   for (const t of terrains) scene.add(t.group);
 
+  // atmosphere shells (§8.3) for every body with an AtmoDef
+  const atmospheres = sys.planets
+    .filter(p => (p.def as PlanetDef).atmo)
+    .map(p => new AtmosphereShell(p, (p.def as PlanetDef).atmo!));
+  for (const a of atmospheres) scene.add(a.mesh);
+
   const stars = createStarfield();
   scene.add(stars);
 
@@ -100,12 +116,19 @@ async function init(): Promise<void> {
   shipRoot.add(ship.object);
   const exhaust = new Exhaust();
   shipRoot.add(exhaust.group);
+  const gear = new LandingGear();
+  shipRoot.add(gear.group);
+  const glow = new ReentryGlow();
+  shipRoot.add(glow.mesh);
   scene.add(shipRoot);
+  const dust = new Dust();
+  scene.add(dust.group);
 
   const rig = new CameraRig(window.innerWidth / window.innerHeight);
   const postfx = createPostFX(renderer, scene, rig.camera);
   const input = new InputSystem(renderer.domElement);
   const flight = new ShipFlight();
+  const autoland = new Autoland();
   const warp = new WarpDrive(sys, flight);
   const tunnel = new WarpTunnel();
   scene.add(tunnel.object);
@@ -115,6 +138,33 @@ async function init(): Promise<void> {
   // spawn: sunward of Earth, 8 radii out, facing the planet
   const earth = sys.planets[2];
   spawnAt(earth.posM, earth.radiusM * 8);
+
+  /** Mars terminator, 4 km AGL, nose at the setting sun — the M5 money shot */
+  function spawnMarsSunset(): void {
+    const sunward = new THREE.Vector3(-mars.posM.x, -mars.posM.y, -mars.posM.z).normalize();
+    const tangent = new THREE.Vector3().crossVectors(sunward, new THREE.Vector3(0, 1, 0)).normalize();
+    const r = mars.radiusM + 4000;
+    flight.curr.pos.set(
+      mars.posM.x + tangent.x * r, mars.posM.y + tangent.y * r, mars.posM.z + tangent.z * r);
+    flight.curr.vel.set(0, 0, 0);
+    const m = new THREE.Matrix4().lookAt(flight.curr.pos, new THREE.Vector3(0, 0, 0), tangent);
+    flight.curr.quat.setFromRotationMatrix(m);
+    flight.curr.omega.set(0, 0, 0);
+    flight.prev.pos.copy(flight.curr.pos);
+    flight.prev.quat.copy(flight.curr.quat);
+    flight.prev.vel.copy(flight.curr.vel);
+  }
+
+  /** Mars entry demo: 60 km up, ~2.4 km/s oblique dive — plasma within seconds */
+  function spawnMarsEntry(): void {
+    spawnAt(mars.posM, mars.radiusM + 60_000);
+    flight.decoupled = true; // keep the dive Newtonian; FA would brake it
+    const inward = new THREE.Vector3(
+      mars.posM.x - flight.curr.pos.x, mars.posM.y - flight.curr.pos.y, mars.posM.z - flight.curr.pos.z).normalize();
+    const across = new THREE.Vector3().crossVectors(inward, new THREE.Vector3(0, 1, 0)).normalize();
+    flight.curr.vel.copy(inward).multiplyScalar(1900).addScaledVector(across, 1400);
+    flight.prev.vel.copy(flight.curr.vel);
+  }
 
   function spawnAt(target: { x: number; y: number; z: number }, standoffM: number): void {
     const toSun = new THREE.Vector3(-target.x, -target.y, -target.z).normalize();
@@ -142,11 +192,33 @@ async function init(): Promise<void> {
   let last = performance.now();
   let fps = 60;
   let frames = 0;
+  let gearRequested = false;
+  let nHeldTicks = 0;
+  let heatFlux = 0;          // W/m², smoothed
+  let landedPin = false;
+  let lastDust = 0;
   const renderPos = new THREE.Vector3();   // f64 world (JS numbers)
   const renderQuat = new THREE.Quaternion();
   const camPosM = new THREE.Vector3();
   const sunDir = new THREE.Vector3();
   const tmp = new THREE.Vector3();
+  const tmp2 = new THREE.Vector3();
+  const radial = new THREE.Vector3();
+  const extAccel = new THREE.Vector3();
+  const vHoriz = new THREE.Vector3();
+
+  /** nearest body + radial data for the physics tick (f64) */
+  function nearestBody() {
+    let best: typeof sys.bodies[number] | null = null;
+    let bd = Infinity;
+    for (const b of sys.bodies) {
+      if (b.kind === 'star') continue;
+      const d = Math.hypot(
+        b.posM.x - flight.curr.pos.x, b.posM.y - flight.curr.pos.y, b.posM.z - flight.curr.pos.z);
+      if (d - b.radiusM < bd) { bd = d - b.radiusM; best = b; }
+    }
+    return best;
+  }
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -167,7 +239,105 @@ async function init(): Promise<void> {
         if (intent.codes.has(`Digit${d}`)) spawnAt(sys.planets[d - 1].posM, sys.planets[d - 1].radiusM * 6);
       }
       if (intent.codes.has('Digit9')) spawnAt(luna.posM, luna.radiusM * 1.06); // Luna, ~10 km AGL
-      flight.step(DT, intent, { steerScale: warp.steerScale, skipTranslation: warpOwns });
+      if (intent.codes.has('Digit0')) spawnMarsSunset();
+      if (intent.codes.has('Minus')) spawnMarsEntry();
+
+      // gear tap / autoland hold (N)
+      if (intent.pressed.has('ship.gearToggle')) gearRequested = !gearRequested;
+      nHeldTicks = intent.held.has('ship.gearToggle') ? nHeldTicks + 1 : 0;
+      if (nHeldTicks === 60) autoland.engage(); // 1 s hold
+
+      // any translation input cancels autoland / lifts off
+      const translating =
+        (intent.axes['ship.strafeX'] ?? 0) !== 0 ||
+        (intent.axes['ship.strafeY'] ?? 0) !== 0 ||
+        (intent.axes['ship.strafeZ'] ?? 0) !== 0;
+      if (translating && autoland.state !== 'IDLE') {
+        autoland.cancel();
+        landedPin = false;
+      }
+
+      // --- environmental physics (§9.3): gravity + drag + autoland, body-local ---
+      extAccel.set(0, 0, 0);
+      lastDust = 0;
+      const body = nearestBody();
+      let qDyn = 0;
+      let rawHeat = 0;
+      if (body && warp.state !== 'WARP') {
+        radial.set(
+          flight.curr.pos.x - body.posM.x,
+          flight.curr.pos.y - body.posM.y,
+          flight.curr.pos.z - body.posM.z);
+        const dCenter = radial.length();
+        radial.divideScalar(dCenter);
+        // gravity inside the local zone
+        const def = body.def as PlanetDef; // MoonDef also satisfies gmKm3S2/atmo access
+        if (dCenter < body.radiusM * 20) {
+          extAccel.addScaledVector(radial, -gravityAccel(def.gmKm3S2, dCenter));
+        }
+        // atmosphere
+        const altDatum = dCenter - body.radiusM;
+        if (def.atmo && altDatum < def.atmo.topM) {
+          const rho = density(def.atmo, altDatum);
+          const speed = flight.curr.vel.length(); // frame-carried → body-relative
+          if (speed > 1 && rho > 1e-9) {
+            const aDrag = Math.min(dragAccel(rho, speed, 6, 50_000), 80);
+            extAccel.addScaledVector(tmp.copy(flight.curr.vel).divideScalar(speed), -aDrag);
+            qDyn = dynamicPressure(rho, speed);
+            rawHeat = suttonGraves(rho, speed);
+          }
+        }
+        // autoland command (radial frame → world)
+        const terrain = terrains.find(t => t.body === body);
+        const altAGL = terrain
+          ? dCenter - terrain.surfaceRadiusAt(radial)
+          : altDatum;
+        const vR = flight.curr.vel.dot(radial);
+        vHoriz.copy(flight.curr.vel).addScaledVector(radial, -vR);
+        const cmd = autoland.step(DT, {
+          altAGL: altAGL - 7.0, // gear plane sits ~7 m below CoM
+          vRadial: vR,
+          vHorizX: vHoriz.x, vHorizY: vHoriz.y, vHorizZ: vHoriz.z,
+          gravity: gravityAccel(def.gmKm3S2, dCenter),
+          maxAccel: 45,
+        });
+        extAccel.addScaledVector(radial, cmd.aRadial);
+        extAccel.x += cmd.aHorizX;
+        extAccel.y += cmd.aHorizY;
+        extAccel.z += cmd.aHorizZ;
+        lastDust = cmd.dust;
+        if (cmd.landedNow) {
+          landedPin = true;
+          rig.trauma = Math.max(rig.trauma, 0.3);
+          gear.update(DT, true, 1);
+        }
+        if (autoland.state === 'FINAL' || autoland.state === 'LANDED') gearRequested = true;
+      }
+      heatFlux += (rawHeat - heatFlux) * Math.min(1, 4 * DT);
+      if (qDyn > 5000) rig.trauma = Math.max(rig.trauma, Math.min(0.45, qDyn / 60_000));
+
+      flight.step(DT, intent, {
+        steerScale: warp.steerScale,
+        skipTranslation: warpOwns,
+        externalAccel: extAccel,
+        suppressAssist: autoland.state === 'DESCEND' || autoland.state === 'FINAL',
+      });
+      // LANDED: pin to the surface (rest on gear); thrust breaks the pin
+      if (landedPin && body) {
+        if (translating) {
+          landedPin = false;
+        } else {
+          flight.curr.vel.set(0, 0, 0);
+          const terrain = terrains.find(t => t.body === body);
+          if (terrain) {
+            const surf = terrain.surfaceRadiusAt(radial) + 7.0;
+            flight.curr.pos.set(
+              body.posM.x + radial.x * surf,
+              body.posM.y + radial.y * surf,
+              body.posM.z + radial.z * surf);
+          }
+        }
+      }
       warpOwns = warp.step(DT);
 
       // terrain collision clamp: never let the ship penetrate the surface
@@ -180,7 +350,7 @@ async function init(): Promise<void> {
         const d = Math.hypot(rx, ry, rz);
         if (d > b.radiusM * 1.5) continue;
         tmp.set(rx / d, ry / d, rz / d);
-        const surf = t.surfaceRadiusAt(tmp) + 4; // keep belly 4 m off the deck
+        const surf = t.surfaceRadiusAt(tmp) + 7.0; // CoM height with gear on the deck
         if (d < surf) {
           flight.curr.pos.set(
             b.posM.x + tmp.x * surf, b.posM.y + tmp.y * surf, b.posM.z + tmp.z * surf);
@@ -267,6 +437,33 @@ async function init(): Promise<void> {
     // ship visuals
     ship.setThrottle(flight.visualThrottle);
     exhaust.update(flight.visualThrottle, flight.boosting);
+
+    // --- M5 visuals: gear, dust, reentry glow, atmosphere shells ---
+    gear.update(dtReal, gearRequested, landedPin ? 1 : 0);
+    const nearBody = nearestBody();
+    if (nearBody && terrainAltitude !== null) {
+      // ground point under the ship (scene space: ship at origin)
+      tmp.set(
+        flight.curr.pos.x - nearBody.posM.x,
+        flight.curr.pos.y - nearBody.posM.y,
+        flight.curr.pos.z - nearBody.posM.z).normalize();
+      tmp2.copy(tmp).multiplyScalar(-(terrainAltitude));
+      dust.update(dtReal, tmp2, tmp, Math.max(lastDust, terrainAltitude < 50 ? flight.visualThrottle * (1 - terrainAltitude / 50) : 0));
+    } else {
+      dust.update(dtReal, tmp2.set(0, -1e5, 0), tmp.set(0, 1, 0), 0);
+    }
+    const plasma01 = THREE.MathUtils.clamp(
+      (heatFlux - PLASMA_START_W_M2) / (PLASMA_FULL_W_M2 - PLASMA_START_W_M2), 0, 1);
+    glow.set(plasma01 > 0 ? 0.15 + plasma01 * 0.85 : heatFlux > PLASMA_START_W_M2 * 0.5 ? 0.08 : 0);
+    if (plasma01 > 0.05) rig.trauma = Math.max(rig.trauma, 0.2 + plasma01 * 0.3);
+    for (const a of atmospheres) {
+      const b = a.body;
+      const dx = b.posM.x - camPosM.x, dy = b.posM.y - camPosM.y, dz = b.posM.z - camPosM.z;
+      const dist = Math.hypot(dx, dy, dz);
+      tmp.set(dx, dy, dz).add(rig.camera.position); // scene-space center (camera-relative convention)
+      tmp2.set(-b.posM.x, -b.posM.y, -b.posM.z).normalize(); // planet → sun
+      a.update(tmp, tmp2, dist);
+    }
     if (flight.boosting) rig.trauma = Math.max(rig.trauma, 0.35);
 
     postfx.render();
@@ -289,8 +486,30 @@ async function init(): Promise<void> {
       targetDistM: warp.target ? warp.targetDistance() : undefined,
       warpState: warp.state,
       warpEtaS: warp.v > 0 ? warp.targetDistance() / warp.v : undefined,
+      altAGL: terrainAltitude,
+      vRadial: nearBody
+        ? flight.curr.vel.dot(tmp.set(
+            flight.curr.pos.x - nearBody.posM.x,
+            flight.curr.pos.y - nearBody.posM.y,
+            flight.curr.pos.z - nearBody.posM.z).normalize())
+        : 0,
+      gearDown: gear.deploy01 > 0.5,
+      autoland: autoland.state,
+      heat01: THREE.MathUtils.clamp(heatFlux / PLASMA_FULL_W_M2, 0, 1),
     });
     map.draw(sys, renderPos);
+
+    // E2E test hook: sim state snapshot (read by scripts/verify-*.mjs)
+    (window as unknown as { __XV: object }).__XV = {
+      autoland: autoland.state,
+      gearDeploy: gear.deploy01,
+      landedPin,
+      speed: flight.speed,
+      altAGL: terrainAltitude,
+      heatFlux,
+      warp: warp.state,
+      fps: Math.round(fps),
+    };
 
     if ((frames++ & 15) === 0) {
       // nearest body + f32 ULP at current |pos| — the "no jitter at Neptune" proof

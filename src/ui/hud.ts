@@ -37,6 +37,7 @@ export class Hud {
     reticleRadius: number; vel: THREE.Vector3; camera: THREE.PerspectiveCamera;
     cockpit: boolean; locked: boolean;
     targetName?: string; targetDistM?: number; warpState?: string; warpEtaS?: number;
+    altAGL?: number | null; vRadial?: number; gearDown?: boolean; autoland?: string; heat01?: number;
   }): void {
     const { ctx } = this;
     const w = window.innerWidth, h = window.innerHeight;
@@ -80,12 +81,28 @@ export class Hud {
       }
     }
 
-    // left block: speed + G
+    // left block: speed + G + landing data
     ctx.fillStyle = CYAN;
     ctx.textAlign = 'right';
     ctx.fillText(`${o.speed.toFixed(0)} m/s`, cx - 90, cy + 4);
     ctx.fillStyle = o.gForce > 6 ? AMBER : CYAN_DIM;
     ctx.fillText(`${o.gForce.toFixed(1)} G`, cx - 90, cy + 22);
+    if (o.altAGL !== null && o.altAGL !== undefined) {
+      ctx.fillStyle = CYAN;
+      ctx.fillText(`ALT ${o.altAGL > 2000 ? `${(o.altAGL / 1000).toFixed(1)} km` : `${o.altAGL.toFixed(0)} m`}`, cx - 90, cy - 14);
+      ctx.fillStyle = (o.vRadial ?? 0) < -20 ? AMBER : CYAN_DIM;
+      ctx.fillText(`${(o.vRadial ?? 0) >= 0 ? '+' : ''}${(o.vRadial ?? 0).toFixed(1)} m/s ↕`, cx - 90, cy - 32);
+    }
+    // heat bar (reentry)
+    if ((o.heat01 ?? 0) > 0.01) {
+      ctx.strokeStyle = CYAN_DIM;
+      ctx.strokeRect(cx - 170, cy + 32, 80, 6);
+      ctx.fillStyle = o.heat01! > 0.7 ? 'rgba(255,90,60,0.95)' : AMBER;
+      ctx.fillRect(cx - 170, cy + 32, 80 * Math.min(1, o.heat01!), 6);
+      ctx.fillStyle = CYAN_DIM;
+      ctx.textAlign = 'right';
+      ctx.fillText('HEAT', cx - 178, cy + 38);
+    }
 
     // right block: mode flags + boost heat
     ctx.textAlign = 'left';
@@ -95,6 +112,14 @@ export class Hud {
     ctx.fillText(o.decoupled ? 'DECOUPLED' : 'COUPLED', cx + 90, cy + 4);
     ctx.fillStyle = CYAN_DIM;
     ctx.fillText(o.cockpit ? 'COCKPIT' : 'CHASE', cx + 90, cy + 22);
+    if (o.gearDown !== undefined) {
+      ctx.fillStyle = o.gearDown ? AMBER : CYAN_DIM;
+      ctx.fillText(o.gearDown ? 'GEAR ▼' : 'GEAR ▲', cx + 90, cy + 58);
+    }
+    if (o.autoland && o.autoland !== 'IDLE') {
+      ctx.fillStyle = AMBER;
+      ctx.fillText(`AUTOLAND ${o.autoland}`, cx + 90, cy + 76);
+    }
     // heat bar
     ctx.strokeStyle = CYAN_DIM;
     ctx.strokeRect(cx + 90, cy + 32, 80, 6);
