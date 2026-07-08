@@ -57,3 +57,14 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - Patch mesh math lives in pure `patchBuilder.ts` (worker is a thin shell) — unit-tested: exact border sharing between neighbors (the crack regression test), outward unit normals, skirt below source, determinism.
 - Collision = analytic height clamp (radial), not Rapier yet — Rapier arrives with M5 landing/gear + M7 on-foot per plan. Camera can still clip terrain (chase cam collision is an M5 task).
 - CPU workers for heightmaps (simplex-noise); TSL compute is a later optimization. MAX_LEVEL 13 ≈ 0.65 m cells on Luna.
+
+## M5 — Atmosphere & landing (2026-07-06)
+
+- **Atmosphere = single-scatter raymarch (O'Neil-class) in TSL**, not full Bruneton: 12 view × 4 light samples, JS-unrolled at graph build (no TSL Loop API risk), ground-sphere occlusion in-march, per-planet spectra from `AtmoDef`. Mars's reversed Rayleigh (OpenSpace data) produces the real blue sunset aureole — verified visually. Bruneton LUTs remain an M6+ upgrade if multi-scatter quality is wanted.
+- **Scale choice**: ρ0/H kept REAL at 1/10 radii → atmospheres are proportionally ~10× thicker than reality. Dramatic limb glow, Kármán line still at the real 99.6 km for Earth. μ_eff = μ_real × 0.01 keeps real surface gravity (unit-tested).
+- **FA-vs-autoland bug (caught by E2E)**: coupled flight assist drives v→0 and cancels the autoland descent law near the ground (hover deadlock at ~16 m). Autoland now suppresses the assist translation loop via `flight.step opts.suppressAssist`.
+- **Landing beats implemented**: gear deploys at FINAL (500 m, 1.2 s ease-out+bounce), dust ring < 50 m, plasma sheath + trauma ∝ q_dyn, LANDED pin (ship rides the planet's rail motion at rest), thrust breaks the pin. Autoland does NOT manage attitude yet (ship keeps its orientation; fine on gear) — attitude hold is an M7-adjacent polish item.
+- **Terrain MAX_LEVEL 13 → 12, split 2.2**: Mars at full depth ran 53 fps at the deck; 12 gives 2.6 m cells and 70+ fps. CDLOD morphing still the proper seam fix.
+- **E2E test hook**: `window.__XV` exposes sim state (autoland/gear/pin/speed/alt/heat/warp/fps) — HUD-canvas states aren't string-greppable; scripts assert on the hook now.
+- **Known issue (pre-M5, still open)**: dark jagged blobs at frame corners in close-to-terrain shots — present since M4, occludes stars, cause unidentified (suspects: far-shell draw order, skirt geometry behind camera). Bisect scheduled for the M6 polish pass.
+- Dev keys: 0 = Mars terminator sunset (4 km AGL, nose at the sun), Minus = Mars entry demo (60 km, 2.4 km/s oblique, decoupled).
