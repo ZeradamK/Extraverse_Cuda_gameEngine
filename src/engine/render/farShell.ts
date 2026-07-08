@@ -66,6 +66,38 @@ export class FarShell {
 
   private buildSun(b: BodyState): THREE.Group {
     const g = new THREE.Group();
+    if ((b.def as { blackHole?: boolean }).blackHole) {
+      // M10: Sagittarius A* — event horizon + hot accretion disk + photon-ring glow
+      const horizon = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 48, 24),
+        new THREE.MeshBasicMaterial({ color: 0x000000 }));
+      g.add(horizon);
+      const diskGeo = new THREE.RingGeometry(1.4, 3.4, 96);
+      const pos = diskGeo.attributes.position as THREE.BufferAttribute;
+      const cols = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i++) {
+        const r = Math.hypot(pos.getX(i), pos.getY(i));
+        const heat = Math.pow(1 - (r - 1.4) / 2.0, 2.2); // inner edge white-hot
+        cols[i * 3] = 1.5 + heat * 4;
+        cols[i * 3 + 1] = 0.7 + heat * 3;
+        cols[i * 3 + 2] = 0.35 + heat * 2;
+      }
+      diskGeo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+      const disk = new THREE.Mesh(diskGeo, new THREE.MeshBasicMaterial({
+        vertexColors: true, transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false,
+      }));
+      disk.rotation.x = -Math.PI / 2.6;
+      disk.name = 'accretion';
+      g.add(disk);
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(1.06, 0.04, 8, 64),
+        new THREE.MeshBasicMaterial({ color: 0xfff1d8, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+      ring.name = 'photonring';
+      g.add(ring);
+      this.sunMesh = horizon;
+      return g;
+    }
     const mat = new THREE.MeshBasicMaterial({
       map: this.tex((b.def as { texture: string }).texture),
       color: 0xffffff,
@@ -144,6 +176,14 @@ export class FarShell {
       orient.add(ring);
     }
     return g;
+  }
+
+  dispose(): void {
+    this.group.removeFromParent();
+    this.group.traverse(o => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) m.geometry.dispose();
+    });
   }
 
   private hidden = new Set<BodyState>();
