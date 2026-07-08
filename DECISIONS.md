@@ -17,3 +17,12 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 
 - All stack versions/URLs verified 2026-07-06; see `EXTRAVERSE_BUILD_PROMPT.md` §18 for sources.
 - Ship scale locked at 18 m length (`SHIP_SCALE = 18/244`).
+
+## M1 — Flight (2026-07-06)
+
+- **Roll sign**: Q/E mapped so stick roll → body −Z rotation with nose = −Z; verified feel in chase cam.
+- **Boost G**: 2× main authority = 100 m/s² ≈ 10 G displayed. Blackout/grey-out effects are deferred to M5 (HUD shows amber G past 6 for now).
+- **Float precision**: M1 flies in plain world coordinates (no camera-relative rendering yet) — fine to ~100 km from origin; M2 introduces the f64 + camera-relative layer per §4.1.
+- **Exhaust**: additive TSL cone plumes (MeshBasicNodeMaterial, opacityNode falloff + flicker) instead of GPU particles — particles arrive with warp VFX (M3). Plumes don't write the emissive MRT, so they don't bloom; the reactor/engine-frame emissives carry the bloom.
+- **Shadow while flying**: sun + shadow frustum follow the ship every frame (directional light target re-anchored to ship position).
+- Verification: `scripts/verify-m1.mjs` — thrust/boost/decouple/camera-toggle exercised headlessly; coupled cap ~252 m/s under boost decay, decoupled coast at 200 m/s & 0 G confirmed via HUD telemetry.
