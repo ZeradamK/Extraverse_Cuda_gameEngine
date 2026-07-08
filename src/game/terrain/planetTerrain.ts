@@ -49,6 +49,7 @@ export class PlanetTerrain {
   private missing: { node: NodeKeyed; dist: number }[] = [];
   private material: THREE.MeshStandardNodeMaterial;
   private camLocal = new THREE.Vector3();
+  private lastResolveCam = new THREE.Vector3(1e12, 0, 0);
   private invSpin = new THREE.Quaternion();
 
   /** scene-space planet center + sun dir + spin, fed to the shader per frame */
@@ -169,6 +170,14 @@ export class PlanetTerrain {
 
     // camera in planet-local (unspun) frame
     this.camLocal.set(dx, dy, dz).applyQuaternion(this.invSpin);
+
+    // re-resolve the LOD tree only when the camera moved > 0.4% of its distance
+    // since the last resolve — kills per-frame churn at cruise speeds AND at rest
+    if (this.lastResolveCam.distanceTo(this.camLocal) < dist * 0.004 && this.frame > 1) {
+      const altSkip = dist - (this.body.radiusM + this.heightField.height(this.camLocal.clone().normalize()));
+      return altSkip;
+    }
+    this.lastResolveCam.copy(this.camLocal);
 
     // LOD select + EXCLUSIVE render-set resolve: a node renders either itself
     // or (all of) its children — never both, or coarse surfaces/skirts poke
