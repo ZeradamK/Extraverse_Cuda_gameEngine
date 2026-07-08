@@ -8,7 +8,7 @@ export type ActionId =
   | 'ship.pitch' | 'ship.yaw' | 'ship.roll'
   | 'ship.strafeX' | 'ship.strafeY' | 'ship.strafeZ'
   | 'ship.boost' | 'ship.allStop' | 'ship.flightAssistToggle' | 'ship.decoupleToggle'
-  | 'ship.warpEngage' | 'ship.cycleTarget'
+  | 'ship.warpEngage' | 'ship.cycleTarget' | 'ship.gearToggle'
   | 'camera.toggleChase' | 'ui.pause';
 
 export interface IntentFrame {
@@ -38,6 +38,7 @@ const KEY_ACTIONS: Record<string, ActionId> = {
   KeyV: 'ship.decoupleToggle',
   KeyB: 'ship.warpEngage',
   KeyG: 'ship.cycleTarget',
+  KeyN: 'ship.gearToggle',
   F4: 'camera.toggleChase',
   Escape: 'ui.pause',
 };
