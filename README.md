@@ -25,13 +25,16 @@ npm run check      # typecheck + 113 unit tests + 11-gate smoke test
 
 | Key | Action |
 | --- | --- |
-| `W A S D R F` | translate · `Shift/Ctrl` boost/brake |
+| `W` / `S` | thrust forward / **brake** |
+| `W`+`SPACE` (hold) | **afterburner** — 5× speed with spool-up; release to decelerate back |
+| `A D` / `R Ctrl` | strafe left/right · up/down |
 | Mouse | pitch/yaw · `Q E` roll |
-| `X` | flight assist · `C` NAV cruise · `G` warp |
-| `N` | landing gear · `L` autoland |
-| `Y` (hold) | exit ship on foot · `F` board |
-| `M` | galaxy map · `[ ]` cycle target · `J` hyperjump |
-| `V` | camera · `P` photo mode · `F5/F9` save/load |
+| `X` | all-stop · `T` flight assist · `V` decouple |
+| `C` | NAV cruise (4,000 mi/s) · `B` warp · `G` cycle target |
+| `N` | landing gear (hold = autoland) |
+| `Y` (hold) | exit ship on foot · `F` board · `Shift` sprint · `Space` jump |
+| `M` | galaxy map · `[ ]` cycle star · `J` hyperjump |
+| `F4` | camera · `F9` photo mode (`P` saves PNG) |
 
 ## Testing
 

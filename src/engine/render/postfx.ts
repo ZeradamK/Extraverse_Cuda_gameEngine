@@ -52,10 +52,13 @@ export function createPostFX(
   scenePass.setMRT(mrtNode);
 
   // GTAO, half-res + temporal filtering, applied inside the lighting context
+  // (?noao bisect flag: the pass mis-darkens planet-scale ground if mistuned)
   const aoPass = ao(prePassDepth, prePassNormal, camera);
   aoPass.resolutionScale = 0.5;
   aoPass.useTemporalFiltering = true;
-  scenePass.contextNode = builtinAOContext(aoPass.getTextureNode().sample(screenUV).r);
+  if (!(typeof location !== 'undefined' && location.search.includes('noao'))) {
+    scenePass.contextNode = builtinAOContext(aoPass.getTextureNode().sample(screenUV).r);
+  }
 
   // temporal AA over the beauty, then add bloom (bloom is smooth — safe after TRAA)
   const traaPass = traa(scenePass, prePassDepth, prePassVelocity, camera);

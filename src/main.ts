@@ -31,6 +31,7 @@ import { CloudLayer } from './game/vfx/cloudLayer';
 import { LandingGear } from './game/vfx/landingGear';
 import { Dust } from './game/vfx/dust';
 import { ReentryGlow } from './game/vfx/reentryGlow';
+import { BoostShell } from './game/vfx/boostShell';
 import type { MoonDef, PlanetDef } from './data/solarSystem';
 import { Exhaust } from './game/vfx/exhaust';
 import { SpaceDust } from './game/vfx/spaceDust';
@@ -155,6 +156,7 @@ async function init(): Promise<void> {
 
   // debug bisect: ?hide=exhaust,stars,shell,atmo,tunnel,dust,glow,gear,terrain
   const hidden = new Set((new URLSearchParams(location.search).get('hide') ?? '').split(','));
+  const RAW_RENDER = location.search.includes('raw'); // bypass the post stack entirely
   if (hidden.has('stars')) stars.visible = false;
   if (hidden.has('shell')) shell.group.visible = false;
   if (hidden.has('terrain')) for (const t of terrains) t.group.visible = false;
@@ -162,7 +164,7 @@ async function init(): Promise<void> {
 
   // sun light: direction + intensity computed per frame from real geometry
   const sun = new THREE.DirectionalLight(SUN.COLOR, 8.0);
-  sun.castShadow = true;
+  sun.castShadow = !location.search.includes('noshadow'); // ?noshadow bisect
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = sun.shadow.camera.bottom = -30;
   sun.shadow.camera.right = sun.shadow.camera.top = 30;
@@ -184,6 +186,8 @@ async function init(): Promise<void> {
   shipRoot.add(gear.group);
   const glow = new ReentryGlow();
   shipRoot.add(glow.mesh);
+  const boostFx = new BoostShell(); // afterburner shell (W+Space)
+  shipRoot.add(boostFx.mesh);
   // banking lean: cosmetic tilt on the VISUAL only (sells turns; sim untouched)
   const shipVisual = ship.object;
   scene.add(shipRoot);
@@ -297,10 +301,53 @@ async function init(): Promise<void> {
   });
 
   // spawn: LOW Earth orbit on the dayside — the planet LOOMS (fills half the
-  // sky at 0.45R altitude), Star Citizen style. Scale reads instantly.
+  // sky at 0.45R altitude), Star Citizen style — AND framed so Luna sits off
+  // Earth's limb (audit fix: the old sunward spawn had the Moon hidden behind
+  // Earth for ~5 days a month and outside the frustum the rest — players never
+  // saw it). Position on the 1.45R sphere is chosen so ship→Luna is ~62° off
+  // ship→Earth-center (Earth's disc half-angle here is 43.6°), and the nose
+  // aims along the bisector: Earth fills the left of frame, Luna floats right.
   const earth = sys.planets[2];
-  spawnAt(earth.posM, earth.radiusM * 1.45);
-  warp.target = earth; // pre-targeted: B warps, G cycles
+  spawnEarthWithLuna();
+  warp.target = luna; // pre-targeted: B warps straight to the Moon, G cycles
+
+  function spawnEarthWithLuna(): void {
+    const E = earth.posM;
+    const u = new THREE.Vector3(luna.posM.x - E.x, luna.posM.y - E.y, luna.posM.z - E.z).normalize();
+    const toSun = new THREE.Vector3(-E.x, -E.y, -E.z).normalize();
+    // dayside perpendicular: keeps Earth lit while offsetting away from the Earth→Luna line
+    let w = new THREE.Vector3().copy(toSun).addScaledVector(u, -toSun.dot(u));
+    if (w.lengthSq() < 1e-6) w.set(0, 1, 0).addScaledVector(u, -u.y); // Luna ~sunward: any perpendicular
+    w.normalize();
+    const theta = THREE.MathUtils.degToRad(62);
+    const r = earth.radiusM * 1.45;
+    flight.curr.pos.set(
+      E.x + (-Math.cos(theta) * u.x + Math.sin(theta) * w.x) * r,
+      E.y + (-Math.cos(theta) * u.y + Math.sin(theta) * w.y) * r,
+      E.z + (-Math.cos(theta) * u.z + Math.sin(theta) * w.z) * r);
+    flight.curr.vel.set(0, 0, 0);
+    // nose along the Earth/Luna bisector; view UP is the separation-plane
+    // NORMAL so the pair splits across the WIDE screen axis (h-FOV 42.8° at
+    // 16:9 vs 27.5° vertical — with the wrong up, Luna sat just above frame)
+    const dirE = new THREE.Vector3(E.x - flight.curr.pos.x, E.y - flight.curr.pos.y, E.z - flight.curr.pos.z).normalize();
+    const dirL = new THREE.Vector3(
+      luna.posM.x - flight.curr.pos.x, luna.posM.y - flight.curr.pos.y, luna.posM.z - flight.curr.pos.z).normalize();
+    const up = new THREE.Vector3().crossVectors(dirE, dirL).normalize();
+    if (up.lengthSq() < 0.5) up.set(0, 1, 0); // degenerate (collinear) fallback
+    const m = new THREE.Matrix4().lookAt(
+      flight.curr.pos,
+      new THREE.Vector3(
+        flight.curr.pos.x + dirE.x + dirL.x,
+        flight.curr.pos.y + dirE.y + dirL.y,
+        flight.curr.pos.z + dirE.z + dirL.z),
+      up);
+    flight.curr.quat.setFromRotationMatrix(m);
+    flight.curr.omega.set(0, 0, 0);
+    flight.prev.pos.copy(flight.curr.pos);
+    flight.prev.quat.copy(flight.curr.quat);
+    flight.prev.vel.copy(flight.curr.vel);
+    flight.prev.omega.copy(flight.curr.omega);
+  }
 
   /** Mars terminator, 4 km AGL, nose at the setting sun — the M5 money shot */
   function spawnMarsSunset(): void {
@@ -474,6 +521,7 @@ async function init(): Promise<void> {
   const sunDir = new THREE.Vector3();
   const tmp = new THREE.Vector3();
   const tmp2 = new THREE.Vector3();
+  const tgtDirV = new THREE.Vector3(); // dedicated: hud.draw holds the reference
   const radial = new THREE.Vector3();
   const extAccel = new THREE.Vector3();
   const vHoriz = new THREE.Vector3();
@@ -528,7 +576,8 @@ async function init(): Promise<void> {
         }
         foot.step(DT, {
           moveX: intent.axes['ship.strafeX'] ?? 0,
-          moveZ: -(intent.axes['ship.strafeZ'] ?? 0),
+          // S is a ship-brake ACTION now, so backpedal reads it explicitly here
+          moveZ: -(intent.axes['ship.strafeZ'] ?? 0) - (intent.held.has('ship.brake') ? 1 : 0),
           sprint: intent.held.has('ship.boost'),
           jump: intent.codes.has('Space'),
           lookDX: intent.lookDX,
@@ -786,7 +835,7 @@ async function init(): Promise<void> {
       fQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), foot.pitch));
       rig.setExplicitPose(fEye, fQuat);
     }
-    const fovKick = warp.factor > 0.02 ? warp.factor * 2 : (flight.boosting ? 1 : 0);
+    const fovKick = warp.factor > 0.02 ? warp.factor * 2 : flight.boost01;
     rig.update(dtReal, ZERO, renderQuat, fovKick);
     camPosM.copy(renderPos).add(rig.camera.position); // f64 add: world camera pos
 
@@ -803,7 +852,10 @@ async function init(): Promise<void> {
     for (const t of terrains) {
       const alt = t.update(camPosM);
       t.group.position.add(rig.camera.position); // group pos was planet−cam; offset to camera space
-      shell.setBodyVisible(t.body, !t.active);
+      // keep the textured proxy up until terrain streaming reports FULL
+      // coverage — hiding it on t.active alone left a black star-pierced
+      // silhouette while patches built (audit fix 2026-07-08)
+      shell.setBodyVisible(t.body, !(t.active && t.covered));
       // shader frame: planet center in scene space + sun dir (terminator/albedo drape)
       tmp.set(
         t.body.posM.x - camPosM.x, t.body.posM.y - camPosM.y, t.body.posM.z - camPosM.z,
@@ -845,7 +897,8 @@ async function init(): Promise<void> {
 
     // ship visuals
     ship.setThrottle(flight.visualThrottle);
-    exhaust.update(flight.visualThrottle, flight.boosting);
+    exhaust.update(flight.visualThrottle, flight.boost01);
+    boostFx.set(flight.boost01);
 
     // relative-motion cues: world-anchored dust streaks + cosmetic banking lean
     dust2.update(dtReal, flight.curr.vel, warp.state === 'WARP');
@@ -880,7 +933,7 @@ async function init(): Promise<void> {
       tmp2.set(-b.posM.x, -b.posM.y, -b.posM.z).normalize(); // planet → sun
       a.update(tmp, tmp2, dist);
     }
-    if (flight.boosting) rig.trauma = Math.max(rig.trauma, 0.35);
+    if (flight.boost01 > 0.05) rig.trauma = Math.max(rig.trauma, 0.1 + 0.25 * flight.boost01);
 
     // --- hyperjump progression (M8): the tunnel IS the loading screen ---
     let hyperFactor = 0;
@@ -901,7 +954,7 @@ async function init(): Promise<void> {
     }
 
     // audio + autosave
-    audio.update(flight.visualThrottle, lastQDyn, Math.max(warp.factor, hyperFactor));
+    audio.update(flight.visualThrottle, lastQDyn, Math.max(warp.factor, hyperFactor, flight.boost01 * 0.4));
     if (warp.state !== prevWarpState) {
       if (warp.state === 'SPOOL') audio.event('warpEnter');
       if (warp.state === 'COOLDOWN') audio.event('warpExit');
@@ -921,15 +974,17 @@ async function init(): Promise<void> {
       if (hidden.has('tunnel')) tunnel.object.visible = false;
       if (hidden.has('dust')) dust.group.visible = false;
       if (hidden.has('glow')) glow.mesh.visible = false;
+      if (hidden.has('boost')) boostFx.mesh.visible = false;
       if (hidden.has('gear')) gear.group.visible = false;
     }
 
-    postfx.render();
+    if (RAW_RENDER) renderer.render(scene, rig.camera); // ?raw bisect: no post stack
+    else postfx.render();
 
     hud.draw({
       speed: flight.speed,
       gForce: flight.gForce,
-      boostHeat: flight.boostHeat,
+      boost01: flight.boost01,
       boosting: flight.boosting,
       flightAssist: flight.flightAssist,
       decoupled: flight.decoupled,
@@ -942,6 +997,12 @@ async function init(): Promise<void> {
       locked: input.locked,
       targetName: warp.target?.name,
       targetDistM: warp.target ? warp.targetDistance() : undefined,
+      targetDir: warp.target
+        ? tgtDirV.set(
+            warp.target.posM.x - renderPos.x,
+            warp.target.posM.y - renderPos.y,
+            warp.target.posM.z - renderPos.z).normalize()
+        : undefined,
       warpState: warp.state,
       warpEtaS: warp.v > 0 ? warp.targetDistance() / warp.v : undefined,
       altAGL: terrainAltitude,
@@ -956,6 +1017,10 @@ async function init(): Promise<void> {
       heat01: THREE.MathUtils.clamp(heatFlux / PLASMA_FULL_W_M2, 0, 1),
       inAtmosphere: inAtmo,
       obstructed: warp.obstructed,
+      inArrivalZone: warp.inArrivalZone,
+      navHint: !foot && !flight.navMode && warp.state === 'IDLE' && !!warp.target
+        && !warp.inArrivalZone
+        && warp.targetDistance() / Math.max(flight.speed, 1) > 600,
       navMode: flight.navMode,
       onFoot: !!foot,
       boardPrompt: !!foot && Math.hypot(foot.position.x, foot.position.z) < 18,
@@ -977,6 +1042,8 @@ async function init(): Promise<void> {
       altAGL: terrainAltitude,
       heatFlux,
       warp: warp.state,
+      boost: flight.boost01,
+      navMode: flight.navMode,
       fps: Math.round(fps),
     };
 

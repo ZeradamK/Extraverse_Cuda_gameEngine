@@ -22,8 +22,12 @@ const V_MAX_COUPLED = 250; // m/s SCM-style speed cap (coupled)
 export const NAV_V_MAX = 4000 * 1609.344; // 6,437,376 m/s ≈ 2.1% c
 const NAV_ACCEL = 30_000; // m/s² — inertial-damper fiction; 0→cruise in minutes, not hours
 const NAV_TAU = 5;        // s — cruise velocity convergence
-const BOOST_MULT = 2.0;
-const BOOST_MAX_S = 4.0; // heat-gated
+/** afterburner (hold Space while thrusting W): 5× the coupled cap + main accel */
+const BOOST_MULT = 5.0;
+const BOOST_ATTACK_TAU = 0.35;  // s — spool-up feel (95% in ~1 s)
+const BOOST_RELEASE_TAU = 1.0;  // s — glow/plume fade on release
+/** damper authority while above the coupled cap (post-afterburner decel: ~3 s from 5×) */
+const OVERCAP_BRAKE = 300;
 const TAU_LIN = 0.4;
 const TAU_ROT = 0.2;
 
@@ -54,7 +58,8 @@ export class ShipFlight {
   boosting = false;
   /** NAV cruise mode (C): coupled cap lifts to NAV_V_MAX, damped by opts.navCap */
   navMode = false;
-  boostHeat = 0; // 0..1, gates boost
+  /** afterburner spool 0..1 — drives the 5× multiplier, boost VFX shell, FOV kick */
+  boost01 = 0;
   /** last commanded accel (body), for G-meter + engine visuals */
   readonly aCmdBody = new THREE.Vector3();
   visualThrottle = 0.2;
@@ -88,14 +93,19 @@ export class ShipFlight {
     if (intent.pressed.has('ship.decoupleToggle')) this.decoupled = !this.decoupled;
     if (intent.pressed.has('ship.navToggle')) this.navMode = !this.navMode;
 
-    // --- boost heat gate ---
-    const wantBoost = intent.held.has('ship.boost');
-    this.boosting = wantBoost && this.boostHeat < 1;
-    this.boostHeat = THREE.MathUtils.clamp(
-      this.boostHeat + (this.boosting ? dt / BOOST_MAX_S : -dt / (BOOST_MAX_S * 2)),
-      0, 1,
-    );
-    const boost = this.boosting ? BOOST_MULT : 1;
+    // --- afterburner: Space WHILE thrusting forward (W); infinite fuel, no heat gate.
+    // boost01 spools up fast / decays slow, so the 5× multiplier, VFX shell,
+    // exhaust plume and FOV kick all ramp instead of snapping.
+    const wantBoost = intent.held.has('ship.afterburner')
+      && (intent.axes['ship.strafeZ'] ?? 0) < 0
+      && !opts?.skipTranslation;
+    this.boosting = wantBoost;
+    const tauB = wantBoost ? BOOST_ATTACK_TAU : BOOST_RELEASE_TAU;
+    this.boost01 += ((wantBoost ? 1 : 0) - this.boost01) * (1 - Math.exp(-dt / tauB));
+    if (this.boost01 < 1e-4) this.boost01 = 0;
+    const boost = 1 + (BOOST_MULT - 1) * this.boost01;
+    /** rotation gets a milder kick (up to 2×) — 5× turn rates would be unflyable */
+    const angBoost = 1 + this.boost01;
 
     // --- rotation: stick → target rates, assist converges omega exponentially ---
     const stickPitch = intent.axes['ship.pitch'] ?? 0; // mouse down = +Y reticle = nose down
@@ -107,9 +117,9 @@ export class ShipFlight {
       -stickRoll * ANG_MAX.roll,
     ).multiplyScalar(steerScale);
     const alpha = this.tmpV2.subVectors(target, c.omega).divideScalar(TAU_ROT);
-    alpha.x = THREE.MathUtils.clamp(alpha.x, -ANG_AUTH.pitch * boost, ANG_AUTH.pitch * boost);
-    alpha.y = THREE.MathUtils.clamp(alpha.y, -ANG_AUTH.yaw * boost, ANG_AUTH.yaw * boost);
-    alpha.z = THREE.MathUtils.clamp(alpha.z, -ANG_AUTH.roll * boost, ANG_AUTH.roll * boost);
+    alpha.x = THREE.MathUtils.clamp(alpha.x, -ANG_AUTH.pitch * angBoost, ANG_AUTH.pitch * angBoost);
+    alpha.y = THREE.MathUtils.clamp(alpha.y, -ANG_AUTH.yaw * angBoost, ANG_AUTH.yaw * angBoost);
+    alpha.z = THREE.MathUtils.clamp(alpha.z, -ANG_AUTH.roll * angBoost, ANG_AUTH.roll * angBoost);
     c.omega.addScaledVector(alpha, dt);
 
     // integrate orientation: q̇ = ½ q ⊗ (0, ω_body)
@@ -126,18 +136,22 @@ export class ShipFlight {
     const sx = intent.axes['ship.strafeX'] ?? 0;
     const sy = intent.axes['ship.strafeY'] ?? 0;
     const sz = intent.axes['ship.strafeZ'] ?? 0; // -1 = forward (W)
-    const allStop = intent.held.has('ship.allStop');
+    // S = active brake (velocity → 0), X = all-stop; both override thrust
+    const braking = intent.held.has('ship.brake') || intent.held.has('ship.allStop');
 
     this.aCmdBody.set(0, 0, 0);
+    let overCap = false;
     if (this.flightAssist && !this.decoupled && !opts?.suppressAssist) {
-      // coupled: stick = target velocity (body frame); NAV lifts the ceiling
+      // coupled: stick = target velocity (body frame); NAV lifts the ceiling;
+      // afterburner ramps the cap toward 5× while spooled
       const vCap = this.navMode
         ? Math.min(NAV_V_MAX, opts?.navCap ?? NAV_V_MAX)
         : V_MAX_COUPLED * (sz < 0 ? boost : 1);
       const vt = this.tmpV.set(sx, sy, sz).multiplyScalar(vCap);
       if (vt.lengthSq() > vCap * vCap) vt.setLength(vCap); // diagonal input must not exceed the cap (audit)
-      if (allStop) vt.set(0, 0, 0);
+      if (braking) vt.set(0, 0, 0);
       const vBody = this.tmpV2.copy(c.vel).applyQuaternion(this.tmpQ.copy(c.quat).invert());
+      overCap = !this.navMode && vBody.lengthSq() > (vCap + 5) * (vCap + 5);
       this.aCmdBody.subVectors(vt, vBody).divideScalar(this.navMode ? NAV_TAU : TAU_LIN);
     } else {
       // decoupled / FA-off: stick = direct thrust
@@ -146,17 +160,22 @@ export class ShipFlight {
         sy * AUTH.vertical,
         sz < 0 ? sz * AUTH.main * boost : sz * AUTH.retro,
       );
-      if (allStop && this.flightAssist) {
+      if (braking && this.flightAssist) {
         const vBody = this.tmpV2.copy(c.vel).applyQuaternion(this.tmpQ.copy(c.quat).invert());
         this.aCmdBody.subVectors(this.tmpV.set(0, 0, 0), vBody).divideScalar(TAU_LIN);
       }
     }
     // clamp to authority (asymmetric Z: main vs retro; NAV = damper-assisted).
-    // Dampers also stay hot ABOVE SCM speeds after NAV exit (spooldown brake) —
+    // Dampers also stay hot ABOVE post-afterburner speeds after NAV exit —
     // otherwise braking from cruise on 30 m/s² RCS takes a literal day.
-    const dampersHot = (this.navMode || c.vel.lengthSq() > 1000 * 1000) && this.flightAssist && !this.decoupled;
+    const dampersHot = (this.navMode || c.vel.lengthSq() > (V_MAX_COUPLED * BOOST_MULT * 1.15) ** 2)
+      && this.flightAssist && !this.decoupled;
     if (dampersHot) {
       this.aCmdBody.clampScalar(-NAV_ACCEL, NAV_ACCEL);
+    } else if (overCap || (braking && this.flightAssist)) {
+      // over the cap (afterburner released) or actively braking: damper-assisted
+      // decel — 5×→1× in ~3 s instead of half a minute on retro RCS
+      this.aCmdBody.clampScalar(-OVERCAP_BRAKE, OVERCAP_BRAKE);
     } else {
       this.aCmdBody.x = THREE.MathUtils.clamp(this.aCmdBody.x, -AUTH.lateral, AUTH.lateral);
       this.aCmdBody.y = THREE.MathUtils.clamp(this.aCmdBody.y, -AUTH.vertical, AUTH.vertical);

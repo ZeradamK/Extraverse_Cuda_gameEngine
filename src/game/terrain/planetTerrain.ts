@@ -102,9 +102,12 @@ export class PlanetTerrain {
       const dir = this.uInvOrient.mul(positionWorld.sub(this.uCenter).normalize()).normalize();
       const lon = atan(dir.z, dir.x.negate());
       const lat = asin(dir.y.clamp(-1, 1));
+      // audit fix: flipY=true upload puts the image TOP (north) at v=1, so
+      // north (+lat) must ADD — the old .sub() mirrored the drape N/S and
+      // disagreed with the CPU land-mask path (row 0 = north)
       const uvE = vec2(
         lon.div(2 * Math.PI).add(0.5).fract(),
-        float(0.5).sub(lat.div(Math.PI)),
+        float(0.5).add(lat.div(Math.PI)),
       );
       const albedo = texture(day, uvE);
       // real color carries; rock detail modulates up close (patch-local freq)
@@ -161,13 +164,17 @@ export class PlanetTerrain {
    * per-frame: LOD select + place group camera-relative.
    * camPosM = camera world f64; returns altitude above terrain (m) if active.
    */
+  /** latched true once a resolve pass finds full coverage; false while inactive */
+  covered = false;
+  private patchesDirty = true;
+
   update(camPosM: Vec3d): number | null {
     const b = this.body;
     const dx = camPosM.x - b.posM.x, dy = camPosM.y - b.posM.y, dz = camPosM.z - b.posM.z;
     const dist = Math.hypot(dx, dy, dz);
     this.active = dist < b.radiusM * 2.2;
     this.group.visible = this.active;
-    if (!this.active) return null;
+    if (!this.active) { this.covered = false; return null; }
 
     // unified body orientation (tilt + spin + wobble) — matches the proxy exactly
     const spinQ = new THREE.Quaternion();
@@ -179,12 +186,20 @@ export class PlanetTerrain {
     // camera in planet-local (unspun) frame
     this.camLocal.set(dx, dy, dz).applyQuaternion(this.invSpin);
 
-    // re-resolve the LOD tree only when the camera moved > 0.4% of its distance
-    // since the last resolve — kills per-frame churn at cruise speeds AND at rest
-    if (this.lastResolveCam.distanceTo(this.camLocal) < dist * 0.004 && this.frame > 1) {
-      const altSkip = dist - (this.body.radiusM + this.heightField.height(this.camLocal.clone().normalize()));
-      return altSkip;
+    // re-resolve the LOD tree when the camera moved meaningfully OR worker
+    // patches completed since the last pass. Audit fix (2026-07-08): the old
+    // skip (a) scaled with distance to the planet CENTER — landed, "0.4% of
+    // dist" was ~700 m, so a parked/slow ship never resolved again — and
+    // (b) ignored build completions, so a stationary camera froze streaming at
+    // the first 12 builds: completed patches stayed invisible (onPatch adds
+    // them hidden) and the queue never refilled. Threshold now scales with
+    // ALTITUDE; patchesDirty forces a pass whenever new geometry landed.
+    const altNow = dist - (this.body.radiusM + this.heightField.height(this.camLocal.clone().normalize()));
+    const moved = this.lastResolveCam.distanceTo(this.camLocal);
+    if (moved < Math.max(altNow, 50) * 0.02 && !this.patchesDirty && this.frame > 1) {
+      return altNow;
     }
+    this.patchesDirty = false;
     this.lastResolveCam.copy(this.camLocal);
 
     // LOD select + EXCLUSIVE render-set resolve: a node renders either itself
@@ -209,6 +224,9 @@ export class PlanetTerrain {
       if (this.inflight.size >= MAX_INFLIGHT) break;
       if (!this.meshes.has(m.node.key) && !this.isInflight(m.node.key)) this.request(m.node);
     }
+    // full coverage reached: a resolve pass found nothing missing — the proxy
+    // can hand over without a black-silhouette gap (latches until deactivated)
+    if (this.missing.length === 0 && this.inflight.size === 0) this.covered = true;
     this.evict();
 
     // altitude above terrain under the camera
@@ -321,6 +339,7 @@ export class PlanetTerrain {
     this.meshes.set(key, mesh);
     this.lastUsed.set(key, this.frame);
     this.group.add(mesh);
+    this.patchesDirty = true; // wake the next update(): reveal + refill the queue
   }
 
   private touch(key: string): void {

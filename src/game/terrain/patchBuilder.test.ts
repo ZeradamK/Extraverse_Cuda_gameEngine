@@ -45,6 +45,30 @@ describe('buildPatch geometry', () => {
     }
   });
 
+  it('TRIANGLES WIND CCW SEEN FROM OUTSIDE (inside-out planet regression)', () => {
+    // 2026-07-08: winding was inverted on every face/level — front-face culling
+    // removed the near ground and all planets rendered their dark far-side
+    // interior. Face normals from winding must point OUTWARD (dot radial > 0).
+    for (const face of [0, 1, 2, 3, 4, 5]) {
+      for (const level of [0, 5, 9]) {
+        const n = 1 << level;
+        const p = buildPatch(req({ face, level, ix: n >> 1, iy: n >> 1 }));
+        const P = p.positions, I = p.indices;
+        const mainTris = (RES - 1) * (RES - 1) * 2;
+        for (let t = 0; t < mainTris; t += 7) {
+          const a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
+          const abx = P[b] - P[a], aby = P[b + 1] - P[a + 1], abz = P[b + 2] - P[a + 2];
+          const acx = P[c] - P[a], acy = P[c + 1] - P[a + 1], acz = P[c + 2] - P[a + 2];
+          const nx = aby * acz - abz * acy;
+          const ny = abz * acx - abx * acz;
+          const nz = abx * acy - aby * acx;
+          const rx = P[a] + p.origin[0], ry = P[a + 1] + p.origin[1], rz = P[a + 2] + p.origin[2];
+          expect(nx * rx + ny * ry + nz * rz, `face ${face} level ${level} tri ${t}`).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
   it('ADJACENT SAME-LEVEL PATCHES SHARE BORDER VERTICES EXACTLY (crack regression)', () => {
     const a = buildPatch(req({ ix: 10, iy: 10 }));
     const b = buildPatch(req({ ix: 11, iy: 10 })); // right neighbor

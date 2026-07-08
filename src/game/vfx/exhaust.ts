@@ -37,11 +37,12 @@ export class Exhaust {
     }
   }
 
-  /** throttle 0..1, boosting flag */
-  update(throttle: number, boosting: boolean): void {
-    const len = 2 + throttle * 10 + (boosting ? 6 : 0);
+  /** throttle 0..1, afterburner spool 0..1 (plume stretches + whitens with boost) */
+  update(throttle: number, boost01: number): void {
+    const len = 2 + throttle * 10 + boost01 * 14;
     this.length += (len - this.length) * 0.2;
-    this.intensity.value = 0.25 + throttle * 0.9 + (boosting ? 0.5 : 0);
-    for (const c of this.group.children) c.scale.set(1 + throttle * 0.3, 1 + throttle * 0.3, this.length);
+    this.intensity.value = 0.25 + throttle * 0.9 + boost01 * 0.9;
+    const w = 1 + throttle * 0.3 + boost01 * 0.45;
+    for (const c of this.group.children) c.scale.set(w, w, this.length);
   }
 }

@@ -7,7 +7,8 @@
 export type ActionId =
   | 'ship.pitch' | 'ship.yaw' | 'ship.roll'
   | 'ship.strafeX' | 'ship.strafeY' | 'ship.strafeZ'
-  | 'ship.boost' | 'ship.allStop' | 'ship.flightAssistToggle' | 'ship.decoupleToggle'
+  | 'ship.boost' | 'ship.afterburner' | 'ship.brake'
+  | 'ship.allStop' | 'ship.flightAssistToggle' | 'ship.decoupleToggle'
   | 'ship.warpEngage' | 'ship.cycleTarget' | 'ship.gearToggle' | 'ship.navToggle'
   | 'ship.exitSeat' | 'foot.interact'
   | 'camera.toggleChase' | 'ui.pause';
@@ -29,14 +30,16 @@ interface KeyAxisBinding { neg?: string; pos?: string }
 
 /** key axes: physical codes → -1/+1 */
 const KEY_AXES: Record<string, KeyAxisBinding> = {
-  'ship.strafeZ': { neg: 'KeyW', pos: 'KeyS' },   // -Z is forward
+  'ship.strafeZ': { neg: 'KeyW' },                 // -Z is forward; S is now BRAKE (action)
   'ship.strafeX': { neg: 'KeyA', pos: 'KeyD' },
-  'ship.strafeY': { pos: 'Space', neg: 'ControlLeft' },
+  'ship.strafeY': { pos: 'KeyR', neg: 'ControlLeft' }, // Space is now AFTERBURNER (action)
   'ship.roll': { neg: 'KeyE', pos: 'KeyQ' },       // roll left/right (right-hand rule about -Z fwd)
 };
 
 const KEY_ACTIONS: Record<string, ActionId> = {
-  ShiftLeft: 'ship.boost',
+  Space: 'ship.afterburner', // hold with W: 5× boost; release: decel back to SCM cap
+  KeyS: 'ship.brake',        // active brake (velocity → 0), not reverse thrust
+  ShiftLeft: 'ship.boost',   // on-foot sprint (ship afterburner lives on Space)
   KeyX: 'ship.allStop',
   KeyT: 'ship.flightAssistToggle',
   KeyV: 'ship.decoupleToggle',

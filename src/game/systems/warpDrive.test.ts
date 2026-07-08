@@ -144,6 +144,82 @@ describe('WarpDrive state machine', () => {
     expect(flight.speed).toBeLessThan(400);
   });
 
+  it('departing low orbit does not obstruct (audit fix: t=0 endpoint artifact)', () => {
+    const { sys, target } = stubSystem(-1e10);
+    // home planet 1.45R "below" the ship; target is ~90° away in the sky.
+    // The old 2R corridor test included the segment START, so this refused.
+    const home = { name: 'Home', kind: 'planet', posM: { x: 0, y: -9.28e5, z: 0 }, radiusM: 6.4e5 } as never;
+    (sys.bodies as unknown[]).push(home);
+    const flight = new ShipFlight();
+    const warp = new WarpDrive(sys, flight);
+    warp.target = target;
+    expect(warp.obstructed).toBe(false);
+    warp.requestSpool();
+    expect(warp.state).toBe('SPOOL');
+  });
+
+  it('a body between ship and target still obstructs at silhouette width', () => {
+    const { sys, target } = stubSystem(-1e10);
+    const blocker = { name: 'B', kind: 'planet', posM: { x: 6.9e5, y: 0, z: -5e9 }, radiusM: 6.4e5 } as never;
+    (sys.bodies as unknown[]).push(blocker); // 1.08R off-axis < 1.2R margin
+    const warp = new WarpDrive(sys, new ShipFlight());
+    warp.target = target;
+    expect(warp.obstructed).toBe(true);
+  });
+
+  it('inside the arrival zone: spool refused instead of silent first-tick drop', () => {
+    const { sys, target } = stubSystem(-9e5); // 900 km < 3R = 1.02e6 m
+    const warp = new WarpDrive(sys, new ShipFlight());
+    warp.target = target;
+    expect(warp.inArrivalZone).toBe(true);
+    warp.requestSpool();
+    expect(warp.state).toBe('IDLE');
+  });
+
+  it('mass-lock ignores bodies BEHIND the nose — departing your orbit is legal', () => {
+    const { sys, target } = stubSystem(-1e10);
+    const flight = new ShipFlight();
+    const warp = new WarpDrive(sys, flight);
+    warp.target = target;
+    warp.requestSpool();
+    stepAll(warp, flight, 3.2);
+    expect(warp.state).toBe('WARP');
+    // home planet appears just behind the ship (+Z side; nose is −Z), well inside 1.6R
+    const home = {
+      name: 'Home', kind: 'planet',
+      posM: { x: 0, y: 0, z: flight.curr.pos.z + 5e5 }, radiusM: 6.4e5,
+    } as never;
+    (sys.bodies as unknown[]).push(home);
+    warp.step(DT);
+    expect(warp.state).toBe('WARP'); // receding → no drop
+  });
+
+  it('mass-lock allows a grazing fly-past that misses the silhouette', () => {
+    const { sys, target } = stubSystem(-1e10);
+    const flight = new ShipFlight();
+    const warp = new WarpDrive(sys, flight);
+    warp.target = target;
+    warp.requestSpool();
+    stepAll(warp, flight, 3.2);
+    expect(warp.state).toBe('WARP');
+    // body far ahead but 1.3R abeam of the flight line (> the 1.2R corridor) —
+    // this is the boot-spawn → Luna geometry (Earth ~1.28R off the ray)
+    const abeam = {
+      name: 'Abeam', kind: 'planet',
+      posM: { x: 6.4e5 * 1.3, y: 0, z: flight.curr.pos.z - 1e9 }, radiusM: 6.4e5,
+    } as never;
+    (sys.bodies as unknown[]).push(abeam);
+    warp.step(DT);
+    expect(warp.state).toBe('WARP'); // miss distance > silhouette → no drop
+    // slide it onto the flight line ahead of the (now fast-moving) ship —
+    // the ray test is PREDICTIVE: it drops before crossing, however far ahead
+    const ab = abeam as { posM: { x: number; z: number } };
+    ab.posM.x = 0;
+    ab.posM.z = flight.curr.pos.z - 1e9;
+    warp.step(DT);
+    expect(warp.state).toBe('COOLDOWN');
+  });
+
   it('manual drop from WARP goes to COOLDOWN', () => {
     const { sys } = stubSystem(-1e10);
     const flight = new ShipFlight();

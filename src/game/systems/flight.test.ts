@@ -68,20 +68,63 @@ describe('ShipFlight — decoupled mode', () => {
   });
 });
 
-describe('ShipFlight — boost heat gate', () => {
-  it('boost doubles authority then heat-gates out after ~4 s', () => {
+describe('ShipFlight — afterburner (hold Space WITH W = 5×, infinite fuel)', () => {
+  it('spools up and lifts the coupled cap toward 5× (1250 m/s)', () => {
     const f = new ShipFlight();
-    // decoupled so speed isn't capped, direct thrust reads authority
-    f.decoupled = true;
-    run(f, 1, intent({ axes: { 'ship.strafeZ': -1 }, held: ['ship.boost'] }));
+    run(f, 12, intent({ axes: { 'ship.strafeZ': -1 }, held: ['ship.afterburner'] }));
     expect(f.boosting).toBe(true);
-    expect(f.aCmdBody.z).toBeCloseTo(-100, 0); // 50 × 2 boost
-    run(f, 3.2, intent({ axes: { 'ship.strafeZ': -1 }, held: ['ship.boost'] }));
-    expect(f.boostHeat).toBeGreaterThan(0.99);
-    expect(f.boosting).toBe(false); // gated
-    // cools down when released
-    run(f, 5, intent());
-    expect(f.boostHeat).toBeLessThan(0.5);
+    expect(f.boost01).toBeGreaterThan(0.99);   // fully spooled
+    expect(f.speed).toBeGreaterThan(1150);
+    expect(f.speed).toBeLessThan(1260);
+  });
+
+  it('does nothing without forward thrust (Space alone)', () => {
+    const f = new ShipFlight();
+    run(f, 3, intent({ held: ['ship.afterburner'] }));
+    expect(f.boosting).toBe(false);
+    expect(f.boost01).toBeLessThan(0.01);
+    expect(f.speed).toBeLessThan(1);
+  });
+
+  it('releasing Space decelerates back to the 250 m/s cap while W stays held', () => {
+    const f = new ShipFlight();
+    run(f, 12, intent({ axes: { 'ship.strafeZ': -1 }, held: ['ship.afterburner'] }));
+    expect(f.speed).toBeGreaterThan(1100);
+    run(f, 10, intent({ axes: { 'ship.strafeZ': -1 } })); // W only — damper-assisted decel
+    expect(f.speed).toBeGreaterThan(240); // still cruising forward at SCM
+    expect(f.speed).toBeLessThan(260);
+  });
+
+  it('multiplies decoupled main-thrust authority by 5 once spooled', () => {
+    const f = new ShipFlight();
+    f.decoupled = true;
+    run(f, 3, intent({ axes: { 'ship.strafeZ': -1 }, held: ['ship.afterburner'] }));
+    expect(f.aCmdBody.z).toBeCloseTo(-250, 0); // 50 × 5
+  });
+});
+
+describe('ShipFlight — S brake', () => {
+  it('kills residual velocity like all-stop', () => {
+    const f = new ShipFlight();
+    run(f, 5, intent({ axes: { 'ship.strafeZ': -1 } }));
+    run(f, 5, intent({ held: ['ship.brake'] }));
+    expect(f.speed).toBeLessThan(1);
+  });
+
+  it('overrides W: braking while thrusting decelerates', () => {
+    const f = new ShipFlight();
+    run(f, 5, intent({ axes: { 'ship.strafeZ': -1 } }));
+    const v0 = f.speed;
+    run(f, 2, intent({ axes: { 'ship.strafeZ': -1 }, held: ['ship.brake'] }));
+    expect(f.speed).toBeLessThan(v0 * 0.2);
+  });
+
+  it('brakes from afterburner speed with damper assist (seconds, not minutes)', () => {
+    const f = new ShipFlight();
+    run(f, 12, intent({ axes: { 'ship.strafeZ': -1 }, held: ['ship.afterburner'] }));
+    expect(f.speed).toBeGreaterThan(1100);
+    run(f, 6, intent({ held: ['ship.brake'] }));
+    expect(f.speed).toBeLessThan(5);
   });
 });
 
@@ -156,11 +199,11 @@ describe('ShipFlight — NAV cruise mode (4000 mi/s)', () => {
 });
 
 describe('ShipFlight — G meter', () => {
-  it('full boost thrust reads ≈ 10 G', () => {
+  it('full afterburner thrust reads ≈ 25 G (50 m/s² × 5)', () => {
     const f = new ShipFlight();
     f.decoupled = true;
-    run(f, 0.5, intent({ axes: { 'ship.strafeZ': -1 }, held: ['ship.boost'] }));
-    expect(f.gForce).toBeGreaterThan(9.5);
-    expect(f.gForce).toBeLessThan(10.6);
+    run(f, 2, intent({ axes: { 'ship.strafeZ': -1 }, held: ['ship.afterburner'] }));
+    expect(f.gForce).toBeGreaterThan(24.5);
+    expect(f.gForce).toBeLessThan(26);
   });
 });

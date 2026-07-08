@@ -120,3 +120,32 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - **M10**: Sagittarius A* always on the jump list (26.6 kly) — event horizon + vertex-heat accretion disk + photon ring + 24k-star warm cluster sky. Lensing post-distortion deferred.
 - **Gating smoke harness** (scripts/smoke.mjs, exit-code 1 on failure — the audit's top finding): 11 gates incl. full M7 walk loop and M8 hyperjump-to-Alpha-Centauri. `npm run check` = tsc + vitest(113) + smoke.
 - Deviations logged: no Bruneton multi-scatter, no CDLOD morph, pause-menu/rebinding UI backlog, idb→localStorage, no lensing shader, headless-E2E screenshots use headed mode when flaky.
+
+## Controls v2 + "why can't I reach the Moon" audit (2026-07-08)
+
+Player-reported: "can't move directly towards the moon and the earth", "I'm not seeing the moon". Diagnosis (3-agent workflow) + fixes, all regression-tested (126 unit tests, 11 smoke gates, 8-check boost/moon E2E):
+
+**Control scheme v2 (user spec):**
+- **W = thrust, S = active BRAKE** (`ship.brake` action, modeled on all-stop — S is no longer reverse translate; foot-mode backpedal reads the brake action explicitly).
+- **Space (hold, with W) = 5× afterburner**: `boost01` spool (attack τ 0.35 s / release τ 1.0 s) ramps cap AND accel via `1+(BOOST_MULT−1)·boost01`; heat gate REMOVED (infinite-fuel design lock). Rotation gets a milder 2× kick. Release decel: `OVERCAP_BRAKE` 300 m/s² damper clamp whenever coupled speed exceeds the live cap (5×→1× in ~3 s); `dampersHot` threshold raised above the boosted cap so it no longer slams post-boost.
+- Vertical strafe moved to **R/Ctrl** (Space freed); ShiftLeft stays foot sprint.
+- VFX: new `BoostShell` (aft-biased additive fresnel + tailward racing bands, driven by boost01) on shipRoot; exhaust takes boost01 (plume +14 m, wider); FOV kick + trauma + audio hum all scale with boost01; HUD BOOST bar (spool, not heat).
+
+**Warp was locked out exactly where players start (audit-confirmed bugs):**
+- OBSTRUCTED test clamped closest-approach to t=0 with a 2R corridor → any ship inside 2R of a body was "obstructed" for EVERY target (spawn = 1.45R Earth ⇒ warp to Luna permanently refused). Fixed: 1.2R silhouette corridor; near-endpoint proximity no longer obstructs.
+- Mass-lock dropped on 1.6R PROXIMITY → departing low orbit emergency-dropped outbound warps. Fixed: predictive nose-ray test (drop only if the ray ahead cuts a 1.2R silhouette) — grazing fly-pasts and departures are legal; regression tests incl. the spawn→Luna geometry (Earth 1.28R abeam).
+- Warp to a target you're already inside 3R of spooled then silently dropped on tick 1 → spool now refused with an "IN ARRIVAL ZONE" HUD line (`warp.inArrivalZone`).
+
+**"Can't move towards them" root cause was perception + discoverability, not physics:** coupled cap 250 m/s vs 38,440 km to Luna (~42 h). NAV cruise was undiscoverable → HUD hint "TARGET FAR — [C] NAV CRUISE · [B] WARP" when ETA at current speed > 10 min; boot pre-targets LUNA and warp from spawn now works (E2E: B at spawn → WARP → arrival in ~80 s).
+
+**Moon visibility:**
+- Spawn reframed: position on the 1.45R sphere chosen so ship→Luna sits 62° off ship→Earth-center, nose on the bisector, camera up = separation-plane normal (pair splits across the WIDE screen axis; with (0,1,0)-ish up Luna sat just above the 27.5° vertical half-FOV).
+- HUD target marker: amber diamond + name on the selected body, screen-edge arrow when off-screen (a true-angular-size Luna is ~10 px — physically honest but unfindable without it; perspective lock respected, no fake scaling).
+- Far-shell textures get `wrapS = RepeatWrapping` (Spline UVs overshoot [0,1] → antimeridian smear).
+- Terrain drape v-flip: north sampled the image's SOUTH row (flipY=true upload ⇒ top of image = v=1, drape used 0.5−lat/π) → 0.5+lat/π; now agrees with the CPU land-mask row order.
+
+**THE bug — planets rendered INSIDE-OUT since M4:** patch triangle winding was CW-from-outside on every face/level; front-face culling removed the near ground everywhere, so all terrain views showed the planet's dark FAR-SIDE INTERIOR (anti-sun normals = black). Explained: "black moon" up close, Mars-sunset ground void, and Earth's CONTINENTS never rendering (ocean sphere showed through where land was culled). Found via bisect chain (post→AO→shadows→lighting→unlit-drape→dot(N,L) paint→offline winding check: 2048/2048 inward). Fixed in patchBuilder (grid + skirts); regression test asserts CCW-from-outside across faces 0–5, levels 0/5/9. Earth now shows land from orbit; Luna is bright regolith at 10 km.
+
+**Terrain streaming stalled for stationary/slow cameras:** the resolve-skip compared camera motion to 0.4% of the distance to the planet CENTER (landed ⇒ ~700 m threshold ⇒ never re-resolved) and completed worker builds never triggered a pass (onPatch adds meshes hidden) — teleport + hover froze at exactly MAX_INFLIGHT=12 patches forever. Fixed: threshold scales with ALTITUDE (`max(alt,50)·0.02`), `patchesDirty` forces a pass whenever geometry lands. Proxy handover now waits for a `covered` latch (a resolve pass with nothing missing + queue empty) instead of hiding on `t.active` — no more star-pierced black silhouette while patches stream.
+
+**Debug bisect flags kept:** `?raw` (bypass post stack), `?noao`, `?noshadow` — alongside the existing `?hide=`/`?debugTerrain`.

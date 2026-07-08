@@ -37,13 +37,16 @@ export class Hud {
   }
 
   draw(o: {
-    speed: number; gForce: number; boostHeat: number; boosting: boolean;
+    speed: number; gForce: number; boost01: number; boosting: boolean;
     flightAssist: boolean; decoupled: boolean; reticleX: number; reticleY: number;
     reticleRadius: number; vel: THREE.Vector3; camera: THREE.PerspectiveCamera;
     cockpit: boolean; locked: boolean;
     targetName?: string; targetDistM?: number; warpState?: string; warpEtaS?: number;
+    /** unit vector ship→target, world frame (scene is camera-relative, so directions project) */
+    targetDir?: THREE.Vector3;
     altAGL?: number | null; vRadial?: number; gearDown?: boolean; autoland?: string; heat01?: number;
     inAtmosphere?: boolean; obstructed?: boolean; navMode?: boolean;
+    inArrivalZone?: boolean; navHint?: boolean;
     onFoot?: boolean; boardPrompt?: boolean; exitPrompt?: boolean;
   }): void {
     const { ctx } = this;
@@ -85,6 +88,45 @@ export class Hud {
           ctx.moveTo(px, py - 12); ctx.lineTo(px, py - 7);
           ctx.stroke();
         }
+      }
+    }
+
+    // target marker: diamond on the selected body (a true-angular-size moon is
+    // ~10 px — physically honest but unfindable without this), edge arrow off-screen
+    if (o.targetDir && !o.onFoot) {
+      this.tmpV.copy(o.targetDir).multiplyScalar(1000).add(o.camera.position);
+      this.tmpV.project(o.camera);
+      const behind = this.tmpV.z > 1;
+      let px = (this.tmpV.x * 0.5 + 0.5) * w;
+      let py = (-this.tmpV.y * 0.5 + 0.5) * h;
+      if (behind) { px = w - px; py = h - py; } // mirror through center when behind
+      const onScreen = !behind && px > 24 && px < w - 24 && py > 24 && py < h - 24;
+      if (onScreen) {
+        ctx.strokeStyle = AMBER;
+        ctx.beginPath();
+        ctx.moveTo(px, py - 13); ctx.lineTo(px + 13, py); ctx.lineTo(px, py + 13); ctx.lineTo(px - 13, py);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.fillStyle = AMBER;
+        ctx.textAlign = 'left';
+        ctx.fillText(o.targetName ?? '', px + 18, py + 4);
+      } else {
+        // clamp to a screen-edge arrow pointing at the target
+        const dx = px - cx, dy = py - cy;
+        const m = Math.max(Math.abs(dx) / (w / 2 - 40), Math.abs(dy) / (h / 2 - 40), 1e-6);
+        const ex = cx + dx / m, ey = cy + dy / m;
+        ctx.save();
+        ctx.translate(ex, ey);
+        ctx.rotate(Math.atan2(dy, dx));
+        ctx.beginPath();
+        ctx.moveTo(11, 0); ctx.lineTo(-6, -7); ctx.lineTo(-6, 7);
+        ctx.closePath();
+        ctx.fillStyle = AMBER;
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = AMBER;
+        ctx.textAlign = 'center';
+        ctx.fillText(o.targetName ?? '', ex, ey > cy ? ey - 14 : ey + 22);
       }
     }
 
@@ -138,11 +180,15 @@ export class Hud {
       ctx.fillStyle = CYAN;
       ctx.fillText('ATMOSPHERE', cx + 90, cy + 40);
     }
-    // heat bar
-    ctx.strokeStyle = CYAN_DIM;
-    ctx.strokeRect(cx + 90, cy + 32, 80, 6);
-    ctx.fillStyle = o.boostHeat > 0.85 ? AMBER : CYAN;
-    ctx.fillRect(cx + 90, cy + 32, 80 * o.boostHeat, 6);
+    // afterburner spool bar (W+Space)
+    if (o.boost01 > 0.01) {
+      ctx.strokeStyle = CYAN_DIM;
+      ctx.strokeRect(cx + 90, cy + 32, 80, 6);
+      ctx.fillStyle = o.boost01 > 0.85 ? AMBER : CYAN;
+      ctx.fillRect(cx + 90, cy + 32, 80 * Math.min(1, o.boost01), 6);
+      ctx.fillStyle = o.boosting ? AMBER : CYAN_DIM;
+      ctx.fillText('BOOST', cx + 178, cy + 38);
+    }
 
     // target + warp block (bottom center)
     if (o.targetName) {
@@ -160,9 +206,16 @@ export class Hud {
       } else if (o.obstructed) {
         ctx.fillStyle = AMBER;
         ctx.fillText('WARP OBSTRUCTED — clear line of sight required', cx, h - 90);
+      } else if (o.inArrivalZone) {
+        ctx.fillStyle = CYAN_DIM;
+        ctx.fillText('IN ARRIVAL ZONE — already at target · [G] next target', cx, h - 90);
       } else {
         ctx.fillStyle = CYAN_DIM;
         ctx.fillText('[B] engage warp  ·  [G] next target', cx, h - 90);
+      }
+      if (o.navHint) {
+        ctx.fillStyle = AMBER;
+        ctx.fillText('TARGET FAR — [C] NAV CRUISE  ·  [B] WARP', cx, h - 70);
       }
     }
 
@@ -178,6 +231,10 @@ export class Hud {
       ctx.textAlign = 'center';
       ctx.fillStyle = CYAN_DIM;
       ctx.fillText('[hold Y] exit ship', cx, h - 40);
+    } else if (o.locked) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = CYAN_DIM;
+      ctx.fillText('W thrust · S brake · W+SPACE afterburner · mouse steer · Q/E roll · R/CTRL up/down', cx, h - 22);
     }
 
     if (!o.locked) {

@@ -58,7 +58,13 @@ export class WarpDrive {
     return Math.hypot(this.target.posM.x - p.x, this.target.posM.y - p.y, this.target.posM.z - p.z);
   }
 
-  /** true when a body blocks the straight path to the target (SC "OBSTRUCTED") */
+  /**
+   * true when a body blocks the straight path to the target (SC "OBSTRUCTED").
+   * Audit fix: the corridor is the body's SILHOUETTE (1.2R margin), not 2R, and
+   * a body you are merely near does not obstruct — the old 2R test included the
+   * segment start point, so any ship in low orbit was "obstructed" for every
+   * target in the sky and warp was unusable exactly where players start.
+   */
   get obstructed(): boolean {
     if (!this.target) return false;
     const p = this.flight.curr.pos;
@@ -72,13 +78,19 @@ export class WarpDrive {
       const bx = b.posM.x - p.x, by = b.posM.y - p.y, bz = b.posM.z - p.z;
       const t = Math.max(0, Math.min(len, (bx * tx + by * ty + bz * tz) / len));
       const cx = bx - (tx / len) * t, cy = by - (ty / len) * t, cz = bz - (tz / len) * t;
-      if (Math.hypot(cx, cy, cz) < b.radiusM * 2) return true;
+      if (Math.hypot(cx, cy, cz) < b.radiusM * 1.2) return true;
     }
     return false;
   }
 
+  /** already inside the target's arrival gate — spooling would drop on tick one */
+  get inArrivalZone(): boolean {
+    if (!this.target) return false;
+    return this.targetDistance() < Math.max(DROP_DIST, this.target.radiusM * 3);
+  }
+
   requestSpool(): void {
-    if (this.state === 'IDLE' && this.target && !this.obstructed) {
+    if (this.state === 'IDLE' && this.target && !this.obstructed && !this.inArrivalZone) {
       this.state = 'SPOOL';
       this.spoolT = 0;
     } else if (this.state === 'WARP') {
@@ -122,15 +134,24 @@ export class WarpDrive {
         if (!this.target) { this.drop(true); return false; }
         const p = f.curr.pos;
         const dTgt = this.targetDistance();
+        const nose = this.tmpEye.set(0, 0, -1).applyQuaternion(f.curr.quat);
         // nearest body surface distance (excluding target when far)
         let dBody = Infinity;
         for (const b of this.sys.bodies) {
-          const dc = Math.hypot(b.posM.x - p.x, b.posM.y - p.y, b.posM.z - p.z);
-          // mass-lock: flying INTO a body's exclusion zone = emergency drop
-          // (Elite-style — the V_MIN floor would otherwise punch through planets)
-          if (b !== this.target && dc < b.radiusM * 1.6) {
-            this.drop(true);
-            return false;
+          const bx = b.posM.x - p.x, by = b.posM.y - p.y, bz = b.posM.z - p.z;
+          const dc = Math.hypot(bx, by, bz);
+          // mass-lock: the nose ray AHEAD would cut a body's silhouette (same
+          // 1.2R corridor as the LOS test) = emergency drop before the V_MIN
+          // floor punches through it. Audit fix: proximity alone must NOT drop —
+          // departing low orbit (spawn = 1.45R Earth) or a grazing fly-past is
+          // legal; only an actual predicted intersection is not.
+          if (b !== this.target) {
+            const tCA = bx * nose.x + by * nose.y + bz * nose.z; // ray param of closest approach
+            const silhouette = b.radiusM * 1.2;
+            if (tCA > 0 && dc * dc - tCA * tCA < silhouette * silhouette) {
+              this.drop(true);
+              return false;
+            }
           }
           const d = dc - b.radiusM * 2;
           if (d < dBody) dBody = d;

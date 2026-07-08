@@ -15,26 +15,38 @@ describe('InputSystem', () => {
     input = new InputSystem(document.createElement('canvas'));
   });
 
-  it('maps WASD/Space/Ctrl/QE to signed axes', () => {
+  it('maps WA/R/Ctrl/QE to signed axes; Space and S are actions, not axes', () => {
     key('keydown', 'KeyW');
     key('keydown', 'KeyA');
-    key('keydown', 'Space');
+    key('keydown', 'KeyR');
     key('keydown', 'KeyQ');
+    key('keydown', 'Space');
+    key('keydown', 'KeyS');
     const f = input.sample(0, DT, false);
-    expect(f.axes['ship.strafeZ']).toBe(-1); // W = forward = −Z
+    expect(f.axes['ship.strafeZ']).toBe(-1); // W = forward = −Z (S is brake, not reverse)
     expect(f.axes['ship.strafeX']).toBe(-1); // A = left
-    expect(f.axes['ship.strafeY']).toBe(1);  // Space = up
+    expect(f.axes['ship.strafeY']).toBe(1);  // R = up
     expect(f.axes['ship.roll']).toBe(1);     // Q
+    expect(f.held.has('ship.afterburner')).toBe(true); // Space
+    expect(f.held.has('ship.brake')).toBe(true);       // S
     key('keyup', 'KeyW');
     const g = input.sample(1, DT, false);
     expect(g.axes['ship.strafeZ']).toBe(0);
   });
 
-  it('opposed keys cancel', () => {
+  it('opposed keys cancel (R up vs Ctrl down)', () => {
+    key('keydown', 'KeyR');
+    key('keydown', 'ControlLeft');
+    const f = input.sample(0, DT, false);
+    expect(f.axes['ship.strafeY']).toBe(0);
+  });
+
+  it('W+S = thrust with brake overlaid (brake wins in the flight model)', () => {
     key('keydown', 'KeyW');
     key('keydown', 'KeyS');
     const f = input.sample(0, DT, false);
-    expect(f.axes['ship.strafeZ']).toBe(0);
+    expect(f.axes['ship.strafeZ']).toBe(-1);
+    expect(f.held.has('ship.brake')).toBe(true);
   });
 
   it('pressed is edge-triggered (fires once), held is level', () => {
@@ -53,6 +65,8 @@ describe('InputSystem', () => {
       ['KeyV', 'ship.decoupleToggle'],
       ['KeyB', 'ship.warpEngage'],
       ['KeyG', 'ship.cycleTarget'],
+      ['Space', 'ship.afterburner'],
+      ['KeyS', 'ship.brake'],
       ['F4', 'camera.toggleChase'],
     ] as const) {
       key('keydown', code);

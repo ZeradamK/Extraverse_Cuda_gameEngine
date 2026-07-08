@@ -45,6 +45,9 @@ export class FarShell {
     const t = this.loader.load(url);
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
+    // Spline-authored sphere UVs overshoot [0,1] slightly at the antimeridian;
+    // clamp wrapping smears a vertical stripe there — repeat is seam-correct
+    t.wrapS = THREE.RepeatWrapping;
     return t;
   }
 

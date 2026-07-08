@@ -138,12 +138,15 @@ export function buildPatch(req: PatchRequest, mask?: LandMask): PatchResult {
   const quadCount = (grid - 1) * (grid - 1);
   const skirtQuads = border.length; // ring
   const indices = new Uint32Array((quadCount + skirtQuads) * 6);
+  // audit fix (2026-07-08): winding must be CCW seen from OUTSIDE the planet —
+  // it was inverted, so front-face culling removed the near ground everywhere
+  // and every planet rendered its dark far-side interior ("black moon" bug)
   let q = 0;
   for (let j = 0; j < grid - 1; j++) {
     for (let i = 0; i < grid - 1; i++) {
       const a = j * grid + i, b = a + 1, c = a + grid, d = c + 1;
-      indices[q++] = a; indices[q++] = c; indices[q++] = b;
-      indices[q++] = b; indices[q++] = c; indices[q++] = d;
+      indices[q++] = a; indices[q++] = b; indices[q++] = c;
+      indices[q++] = b; indices[q++] = d; indices[q++] = c;
     }
   }
   for (let e = 0; e < border.length; e++) {
@@ -151,8 +154,8 @@ export function buildPatch(req: PatchRequest, mask?: LandMask): PatchResult {
     const b1 = border[(e + 1) % border.length];
     const s0 = skirtIndexOf.get(b0)!;
     const s1 = skirtIndexOf.get(b1)!;
-    indices[q++] = b0; indices[q++] = s0; indices[q++] = b1;
-    indices[q++] = b1; indices[q++] = s0; indices[q++] = s1;
+    indices[q++] = b0; indices[q++] = b1; indices[q++] = s0;
+    indices[q++] = b1; indices[q++] = s1; indices[q++] = s0;
   }
 
   return { id: req.id, positions, normals, indices, origin: [ox, oy, oz] };
