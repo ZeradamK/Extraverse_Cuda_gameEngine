@@ -3,7 +3,7 @@
  * authority, Elite/SC-style flight assist (exponential setpoint tracking).
  * No gravity/drag yet (M1 = empty space); those join in M2/M5.
  */
-import * as THREE from 'three/webgpu';
+import * as THREE from 'three';
 import type { IntentFrame } from '../../engine/core/input';
 
 /** per-axis linear authority, m/s² (body frame; -Z = forward) */
