@@ -68,3 +68,12 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - **E2E test hook**: `window.__XV` exposes sim state (autoland/gear/pin/speed/alt/heat/warp/fps) — HUD-canvas states aren't string-greppable; scripts assert on the hook now.
 - **Known issue (pre-M5, still open)**: dark jagged blobs at frame corners in close-to-terrain shots — present since M4, occludes stars, cause unidentified (suspects: far-shell draw order, skirt geometry behind camera). Bisect scheduled for the M6 polish pass.
 - Dev keys: 0 = Mars terminator sunset (4 km AGL, nose at the sun), Minus = Mars entry demo (60 km, 2.4 km/s oblique, decoupled).
+
+## M6 — Earth (2026-07-06)
+
+- **Corner-blob "bug" diagnosed as correct physics**: bisect (?hide= toggles) showed the dark jagged frame-edge shapes in every variant — they're the unlit night-side limb of the body (terrain silhouettes past the terminator occluding stars). Closed, not a bug. `?hide=exhaust,stars,shell,atmo,tunnel,dust,glow,gear,terrain` stays as a permanent debug tool.
+- **Real continents via land mask**: Blue Marble day texture → 1024×512 water/land mask (blue-dominance heuristic, unit-tested) → gates the Earth heightfield (land rises, seafloor −900 m) and ships to terrain workers via a one-time init message. Geometry matches albedo; no DEM download needed yet (NASA Trek tiles remain the upgrade path).
+- **Real-texture drape**: terrain shader computes equirect UV from world direction (spin-corrected longitude via uniform) — real albedo at all LODs, rock detail modulating up close. Night lights use the same UV with a terminator smoothstep on `normalWorld·sunDir` — fixes the M2 "lights everywhere" issue on BOTH the terrain and the far-shell proxy (proxy got a node material + per-body sun uniform).
+- **Ocean**: datum-radius specular sphere (roughness 0.12) inside the terrain group; collision/landing surface = max(terrain, datum) on ocean worlds — you belly-land on water, not the seafloor. FFT waves remain a later tier.
+- **Clouds**: real 2k cloud map on a translucent DoubleSide sphere at R+6 km with slow drift (tier-1 of §8.4); volumetric raymarch still future.
+- Money shot verified: sunrise over Earth from 224 km — blue Rayleigh limb ring + sunrise band, real clouds over the Pacific, 120 fps, 0 console errors. Note: verify-m6's "low pass" leg times out by design (autoland descends at 55 m/s from 215 km ≈ 65 min) — informational, not a failure; manual dives are the way down from orbit.
