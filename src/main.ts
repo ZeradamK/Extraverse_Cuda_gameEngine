@@ -14,7 +14,9 @@ import { FarShell } from './engine/render/farShell';
 import { InputSystem } from './engine/core/input';
 import { ShipFlight } from './game/systems/flight';
 import { SolSystem } from './game/systems/solSystem';
+import { WarpDrive } from './game/systems/warpDrive';
 import { Exhaust } from './game/vfx/exhaust';
+import { WarpTunnel } from './game/vfx/warpTunnel';
 import { createStarfield } from './game/vfx/starfield';
 import { Hud } from './ui/hud';
 import { SystemMap } from './ui/systemMap';
@@ -94,6 +96,9 @@ async function init(): Promise<void> {
   const postfx = createPostFX(renderer, scene, rig.camera);
   const input = new InputSystem(renderer.domElement);
   const flight = new ShipFlight();
+  const warp = new WarpDrive(sys, flight);
+  const tunnel = new WarpTunnel();
+  scene.add(tunnel.object);
   const hud = new Hud(document.body);
   const map = new SystemMap(document.body);
 
@@ -140,15 +145,19 @@ async function init(): Promise<void> {
     fps = fps * 0.95 + (1 / Math.max(dtReal, 1e-4)) * 0.05;
 
     acc += dtReal;
+    let warpOwns = warp.state === 'WARP';
     while (acc >= DT) {
       const recenter = flight.flightAssist && !input.hasMouseInput;
       const intent = input.sample(tick++, DT, recenter);
       if (intent.pressed.has('camera.toggleChase')) rig.toggle();
+      if (intent.pressed.has('ship.cycleTarget')) warp.cycleTarget();
+      if (intent.pressed.has('ship.warpEngage')) warp.requestSpool();
       if (intent.codes.has('F2')) map.toggle();
       for (let d = 1; d <= 8; d++) {
         if (intent.codes.has(`Digit${d}`)) spawnAt(sys.planets[d - 1].posM, sys.planets[d - 1].radiusM * 6);
       }
-      flight.step(DT, intent);
+      flight.step(DT, intent, { steerScale: warp.steerScale, skipTranslation: warpOwns });
+      warpOwns = warp.step(DT);
       acc -= DT;
     }
     sys.update(dtReal); // rails are analytic — real-rate epoch advance
@@ -161,8 +170,16 @@ async function init(): Promise<void> {
     // camera-relative: ship stays at render origin; rig orbits origin
     shipRoot.position.set(0, 0, 0);
     shipRoot.quaternion.copy(renderQuat);
-    rig.update(dtReal, ZERO, renderQuat, flight.boosting);
+    const fovKick = warp.factor > 0.02 ? warp.factor * 2 : (flight.boosting ? 1 : 0);
+    rig.update(dtReal, ZERO, renderQuat, fovKick);
     camPosM.copy(renderPos).add(rig.camera.position); // f64 add: world camera pos
+
+    // warp VFX
+    tunnel.object.position.copy(rig.camera.position);
+    tunnel.update(dtReal, warp.factor, renderQuat);
+    postfx.warpCA.value = 0.65 * warp.factor * warp.factor;
+    if (warp.state === 'SPOOL') rig.trauma = Math.max(rig.trauma, 0.1 + 0.25 * (warp.spoolT / 3));
+    if (warp.state === 'WARP' && warp.factor > 0.9) rig.trauma = Math.max(rig.trauma, 0.12);
 
     // far shell + stars around the camera
     shell.update(camPosM);
@@ -202,6 +219,10 @@ async function init(): Promise<void> {
       camera: rig.camera,
       cockpit: rig.mode === 'cockpit',
       locked: input.locked,
+      targetName: warp.target?.name,
+      targetDistM: warp.target ? warp.targetDistance() : undefined,
+      warpState: warp.state,
+      warpEtaS: warp.v > 0 ? warp.targetDistance() / warp.v : undefined,
     });
     map.draw(sys, renderPos);
 

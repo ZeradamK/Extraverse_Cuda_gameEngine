@@ -36,6 +36,7 @@ export class Hud {
     flightAssist: boolean; decoupled: boolean; reticleX: number; reticleY: number;
     reticleRadius: number; vel: THREE.Vector3; camera: THREE.PerspectiveCamera;
     cockpit: boolean; locked: boolean;
+    targetName?: string; targetDistM?: number; warpState?: string; warpEtaS?: number;
   }): void {
     const { ctx } = this;
     const w = window.innerWidth, h = window.innerHeight;
@@ -99,6 +100,25 @@ export class Hud {
     ctx.strokeRect(cx + 90, cy + 32, 80, 6);
     ctx.fillStyle = o.boostHeat > 0.85 ? AMBER : CYAN;
     ctx.fillRect(cx + 90, cy + 32, 80 * o.boostHeat, 6);
+
+    // target + warp block (bottom center)
+    if (o.targetName) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = CYAN;
+      const dist = o.targetDistM! > 1e9 ? `${(o.targetDistM! / 1e9).toFixed(2)} Gm`
+        : o.targetDistM! > 1e6 ? `${(o.targetDistM! / 1e6).toFixed(1)} Mm`
+        : `${(o.targetDistM! / 1e3).toFixed(0)} km`;
+      ctx.fillText(`▸ ${o.targetName}  ${dist}`, cx, h - 110);
+      if (o.warpState && o.warpState !== 'IDLE') {
+        ctx.fillStyle = AMBER;
+        const eta = o.warpEtaS && isFinite(o.warpEtaS) && o.warpState === 'WARP'
+          ? `  ·  ETA ${o.warpEtaS.toFixed(0)} s` : '';
+        ctx.fillText(`DRIVE ${o.warpState}${eta}`, cx, h - 90);
+      } else {
+        ctx.fillStyle = CYAN_DIM;
+        ctx.fillText('[B] engage warp  ·  [G] next target', cx, h - 90);
+      }
+    }
 
     if (!o.locked) {
       ctx.textAlign = 'center';
