@@ -42,3 +42,17 @@ export function suttonGraves(rho: number, speed: number, noseRadiusM = 1): numbe
 /** plasma VFX thresholds (§9.3) */
 export const PLASMA_START_W_M2 = 40_000;  // glow begins (tuned for thin Mars air drama)
 export const PLASMA_FULL_W_M2 = 900_000;  // full streamers
+
+/** ground velocity Ω × r about a body's tilted spin axis (axis = Rx(tilt)·ŷ) */
+export function surfaceVelocity(
+  tiltRad: number, rotationHoursAbs: number,
+  rx: number, ry: number, rz: number,
+  out: { x: number; y: number; z: number },
+): void {
+  const w = (2 * Math.PI) / (rotationHoursAbs * 3600);
+  const ay = Math.cos(tiltRad) * w;
+  const az = Math.sin(tiltRad) * w;
+  out.x = ay * rz - az * ry;
+  out.y = az * rx;
+  out.z = -ay * rx;
+}

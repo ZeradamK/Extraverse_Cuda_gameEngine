@@ -8,7 +8,7 @@
 import * as THREE from 'three/webgpu';
 import { color, float, normalWorld, smoothstep, texture as texNode, uniform } from 'three/tsl';
 import type { Vec3d } from '../math/kepler';
-import type { BodyState } from '../../game/systems/solSystem';
+import { bodyOrientation, type BodyState } from '../../game/systems/solSystem';
 import type { PlanetDef, MoonDef } from '../../data/solarSystem';
 
 const R_SHELL = 9000; // m — inside camera far (5e4), beyond any near geometry
@@ -17,6 +17,7 @@ export class FarShell {
   readonly group = new THREE.Group();
   private proxies = new Map<BodyState, THREE.Group>();
   private sunUniforms = new Map<BodyState, { value: THREE.Vector3 }>();
+  private scratchQ = new THREE.Quaternion();
   private sunMesh!: THREE.Mesh;
   private loader = new THREE.TextureLoader();
 
@@ -91,11 +92,15 @@ export class FarShell {
       roughness: 1.0,
       metalness: 0.0,
     });
-    // user-authored geometry when provided (photoreal_earth / moon gltfs)
+    // user-authored geometry when provided (photoreal_earth / moon gltfs).
+    // 'orient' carries the unified body quaternion (tilt·spin·wobble) so the
+    // ring/clouds tilt WITH the planet and poles never precess (audit fix).
     const geo = this.geoOverrides.get(b.name) ?? new THREE.SphereGeometry(1, 48, 24);
+    const orient = new THREE.Group();
+    orient.name = 'orient';
+    g.add(orient);
     const sphere = new THREE.Mesh(geo, mat);
-    sphere.rotation.order = 'ZXY';
-    g.add(sphere);
+    orient.add(sphere);
 
     const pd = def as PlanetDef;
     if (pd.emissiveNight) {
@@ -116,7 +121,7 @@ export class FarShell {
       });
       const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.008, 48, 24), cloudMat);
       clouds.name = 'clouds';
-      g.add(clouds);
+      orient.add(clouds);
     }
     if (pd.ring) {
       const inner = pd.ring.innerKm / pd.radiusKm;
@@ -134,9 +139,9 @@ export class FarShell {
         roughness: 1, metalness: 0,
       });
       const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.rotation.x = -Math.PI / 2; // ring plane = equator
+      ring.rotation.x = -Math.PI / 2; // ring plane = equator (inherits the body tilt via 'orient')
       ring.name = 'ring';
-      g.add(ring);
+      orient.add(ring);
     }
     return g;
   }
@@ -173,17 +178,15 @@ export class FarShell {
         (glint.material as THREE.SpriteMaterial).opacity = glintFade * 0.9;
         glint.scale.setScalar((0.0012 * R_SHELL) / s); // constant on-screen size (undo parent scale)
       }
-      const sphere = g.children[0] as THREE.Mesh;
-      sphere.rotation.z = b.axialTiltRad;
-      sphere.rotation.y = b.spin;
-      sphere.rotation.x = b.wobble; // libration nod (tidally locked moons)
+      const orient = g.getObjectByName('orient');
+      if (orient) bodyOrientation(b, orient.quaternion, this.scratchQ);
       const uSun = this.sunUniforms.get(b);
       if (uSun) {
         const l = Math.hypot(b.posM.x, b.posM.y, b.posM.z) || 1;
         uSun.value.set(-b.posM.x / l, -b.posM.y / l, -b.posM.z / l); // body → sun
       }
       const clouds = g.getObjectByName('clouds');
-      if (clouds) clouds.rotation.y = b.spin * 0.85;
+      if (clouds) clouds.rotation.y = b.spin * 0.03; // slow drift RELATIVE to the surface
       order.push({ g, d });
     }
     // farthest first
