@@ -29,7 +29,9 @@ import { Dust } from './game/vfx/dust';
 import { ReentryGlow } from './game/vfx/reentryGlow';
 import type { PlanetDef } from './data/solarSystem';
 import { Exhaust } from './game/vfx/exhaust';
+import { SpaceDust } from './game/vfx/spaceDust';
 import { WarpTunnel } from './game/vfx/warpTunnel';
+import { loadCelestialMeshes } from './engine/assets/celestialMeshes';
 import { createStarfield } from './game/vfx/starfield';
 import { Hud } from './ui/hud';
 import { SystemMap } from './ui/systemMap';
@@ -78,7 +80,13 @@ async function init(): Promise<void> {
 
   // --- the system on rails ---
   const sys = new SolSystem(Date.now());
-  const shell = new FarShell(sys.bodies);
+  // user-authored Earth/Moon meshes (photoreal_earth.gltf, moon_rotation_wobble.gltf)
+  bootStatus.textContent = 'Loading celestial meshes…';
+  const celestial = await loadCelestialMeshes();
+  const shell = new FarShell(sys.bodies, new Map([
+    ['Earth', celestial.earth],
+    ['Luna', celestial.moon],
+  ]));
   scene.add(shell.group);
 
   // --- landable terrain (M4: Luna + Mars; M6: Earth with real continents) ---
@@ -90,7 +98,7 @@ async function init(): Promise<void> {
   const terrains = [
     // Luna: real 8k albedo draped over the crater heightfield
     new PlanetTerrain(luna, 'luna', 20260706, 0xffffff, {
-      realDayTexture: '/textures/planets/8k_moon.jpg',
+      realDayTexture: '/textures/planets/4k_moon.jpg', // 8k decoded = 134 MB GPU — crashed headless Chrome
     }),
     new PlanetTerrain(mars, 'mars', 19570104, 0xb4653f),
     new PlanetTerrain(earthBody, 'earth', 19690720, 0xffffff, {
@@ -143,7 +151,11 @@ async function init(): Promise<void> {
   shipRoot.add(gear.group);
   const glow = new ReentryGlow();
   shipRoot.add(glow.mesh);
+  // banking lean: cosmetic tilt on the VISUAL only (sells turns; sim untouched)
+  const shipVisual = ship.object;
   scene.add(shipRoot);
+  const dust2 = new SpaceDust();
+  scene.add(dust2.object);
   const dust = new Dust();
   scene.add(dust.group);
 
@@ -516,6 +528,13 @@ async function init(): Promise<void> {
     // ship visuals
     ship.setThrottle(flight.visualThrottle);
     exhaust.update(flight.visualThrottle, flight.boosting);
+
+    // relative-motion cues: world-anchored dust streaks + cosmetic banking lean
+    dust2.update(dtReal, flight.curr.vel, warp.state === 'WARP');
+    const leanRoll = THREE.MathUtils.clamp(-flight.curr.omega.y * 0.45, -0.3, 0.3);
+    const leanPitch = THREE.MathUtils.clamp(flight.curr.omega.x * 0.18, -0.15, 0.15);
+    shipVisual.rotation.z += (leanRoll - shipVisual.rotation.z) * Math.min(1, 6 * dtReal);
+    shipVisual.rotation.x += (leanPitch - shipVisual.rotation.x) * Math.min(1, 6 * dtReal);
 
     // --- M5 visuals: gear, dust, reentry glow, atmosphere shells ---
     gear.update(dtReal, gearRequested, landedPin ? 1 : 0);
