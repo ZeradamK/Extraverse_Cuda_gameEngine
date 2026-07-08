@@ -112,3 +112,11 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - rng "golden pin" was a tautology → real hardcoded literals.
 
 **Deferred (documented):** carrier-handoff hysteresis, camera-vs-ship altitude readout, gForce omits external accel, planetTerrain streaming unit tests, soak/replay/perf-gate tests (backlog list from the QA audit).
+
+## M8–M10 + full test battery (2026-07-07)
+
+- **M8 Galaxy**: 5,161 real HYG stars baked to /data/stars.json (mag<6 ∪ named ∪ <8 pc; CC BY-SA astronexus — credits obligation carried in the map footer). Galaxy map (M; [ ] cycle candidates ≤60 ly, J jumps). Hyperjump: 5 s charge → 12 s tunnel (system generated mid-tunnel = diegetic loading). ProcSystem: deterministic seed-hierarchy systems (2–6 planets, rocky/gas, seeded atmospheres w/ Mars- or Earth-type spectra, landable terrain reusing luna/mars kinds with per-planet seeds/tints), structurally SolSystem-compatible so flight/warp/autoland/terrain run unchanged. Per-system seeded starfield skybox. Save/load: localStorage v1 (starId/pos/quat), autosave 10 s + on jump, restored at boot (idb deferred).
+- **M9**: PROCEDURAL WebAudio (no asset downloads — reactor saws+lowpass by throttle, bandpass wind ∝ q_dyn, synthesized warp/jump/thud/gear/UI events); photo mode F9 (+P saves PNG); pause/credits menu deferred to backlog (HUD shows control hints; credits string in galaxy map).
+- **M10**: Sagittarius A* always on the jump list (26.6 kly) — event horizon + vertex-heat accretion disk + photon ring + 24k-star warm cluster sky. Lensing post-distortion deferred.
+- **Gating smoke harness** (scripts/smoke.mjs, exit-code 1 on failure — the audit's top finding): 11 gates incl. full M7 walk loop and M8 hyperjump-to-Alpha-Centauri. `npm run check` = tsc + vitest(113) + smoke.
+- Deviations logged: no Bruneton multi-scatter, no CDLOD morph, pause-menu/rebinding UI backlog, idb→localStorage, no lensing shader, headless-E2E screenshots use headed mode when flaky.
