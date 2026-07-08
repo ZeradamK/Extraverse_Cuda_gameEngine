@@ -45,3 +45,15 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - Warp tunnel = 500 additive LineSegments scrolling in a camera-space cylinder (CPU-updated, ~0 cost); CA strength = 0.65·factor².
 - During WARP the flight sim skips translation (warp owns pos/vel; HUD speed reads warp v); exit drops to 150 m/s forward drift (350 on emergency).
 - Verified end-to-end: G-cycle to Mars, B engage, auto-drop at 17 Mm / sun 1.45 AU, 0 console errors, 120 fps (scripts/verify-m3.mjs).
+
+## M4 — Planet terrain (2026-07-06)
+
+- **Local-frame carry is mandatory** (found by E2E): bodies move on heliocentric rails (~3 km/s scaled) — without carrying the ship in the nearest body's frame (< 3R), the planet literally flies away mid-descent. `BodyState.deltaM` + per-frame carry in main; skipped during WARP. Surface-rotation carry (spin) still TODO before M7 on-foot.
+- **Exclusive quadtree resolve**: render a node OR its four children, never both — coarse stand-ins + their skirts poke through fine terrain otherwise (the "pink grid" bug). While streaming, a built parent stands in exclusively; holes only if nothing in the chain is built.
+- **Nearest-first build queue**: DFS-order requests starved the patches directly under the ship (worker slots eaten by horizon nodes). All missing nodes are collected per frame, sorted by camera distance, dispatched to the pool (12 in flight, 2 workers).
+- **Age-based eviction** (not strict LRU count): evict only patches unused for 240+ frames; strict-count eviction thrashed against parent stand-ins (rebuild loop, starved queue).
+- **Skirts at 2.5% arc**: 12% skirts read as black walls at LOD transitions near the ground. Residual hairline seams remain at close range — proper fix is CDLOD vertex morphing or neighbor-LOD stitching (polish backlog, pre-M6).
+- Terrain patches cast no shadows (receive only) — casting doubled shadow-pass draws for zero visual gain at this scale.
+- Patch mesh math lives in pure `patchBuilder.ts` (worker is a thin shell) — unit-tested: exact border sharing between neighbors (the crack regression test), outward unit normals, skirt below source, determinism.
+- Collision = analytic height clamp (radial), not Rapier yet — Rapier arrives with M5 landing/gear + M7 on-foot per plan. Camera can still clip terrain (chase cam collision is an M5 task).
+- CPU workers for heightmaps (simplex-noise); TSL compute is a later optimization. MAX_LEVEL 13 ≈ 0.65 m cells on Luna.
