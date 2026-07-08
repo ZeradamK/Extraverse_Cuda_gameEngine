@@ -11,8 +11,8 @@ import type { Vec3d } from '../../engine/math/kepler';
 import type { PatchRequest, PatchResult } from '../../engine/workers/terrainWorker';
 import { createHeightField, type HeightField, type PlanetKind } from './heightfield';
 
-const SPLIT_FACTOR = 2.5;
-const MAX_LEVEL = 13;
+const SPLIT_FACTOR = 2.2;
+const MAX_LEVEL = 12; // ~1.3 m cells (Luna) / 2.6 m (Mars) — fps > detail for hover heights
 const MAX_INFLIGHT = 12;
 const CACHE_MAX = 1600;
 /** evict only patches unused for this many frames (prevents standin/evict thrash) */
