@@ -12,6 +12,8 @@ export interface BodyState {
   parent: BodyState | null;
   /** world position, METERS at SYSTEM_SCALE, f64 (heliocentric world frame) */
   posM: Vec3d;
+  /** position delta of the last update() — for local-frame carry (§9.6) */
+  deltaM: Vec3d;
   /** scaled radius, m */
   radiusM: number;
   /** current spin angle, rad */
@@ -31,7 +33,7 @@ export class SolSystem {
     this.epochMs = startEpochMs;
     this.sun = {
       def: SUN_DEF, name: 'Sol', kind: 'star', parent: null,
-      posM: { x: 0, y: 0, z: 0 },
+      posM: { x: 0, y: 0, z: 0 }, deltaM: { x: 0, y: 0, z: 0 },
       radiusM: SUN_DEF.radiusKm * 1000 * SYSTEM_SCALE,
       spin: 0, axialTiltRad: 0,
     };
@@ -39,7 +41,7 @@ export class SolSystem {
     for (const p of PLANETS) {
       const ps: BodyState = {
         def: p, name: p.name, kind: 'planet', parent: this.sun,
-        posM: { x: 0, y: 0, z: 0 },
+        posM: { x: 0, y: 0, z: 0 }, deltaM: { x: 0, y: 0, z: 0 },
         radiusM: p.radiusKm * 1000 * SYSTEM_SCALE,
         spin: 0, axialTiltRad: (p.axialTiltDeg * Math.PI) / 180,
       };
@@ -48,13 +50,14 @@ export class SolSystem {
       for (const m of p.moons) {
         this.bodies.push({
           def: m, name: m.name, kind: 'moon', parent: ps,
-          posM: { x: 0, y: 0, z: 0 },
+          posM: { x: 0, y: 0, z: 0 }, deltaM: { x: 0, y: 0, z: 0 },
           radiusM: m.radiusKm * 1000 * SYSTEM_SCALE,
           spin: 0, axialTiltRad: 0,
         });
       }
     }
     this.update(0);
+    for (const b of this.bodies) { b.deltaM.x = 0; b.deltaM.y = 0; b.deltaM.z = 0; } // first update is not motion
   }
 
   /** advance sim clock and re-evaluate all rails (analytic — any dt is exact) */
@@ -64,6 +67,7 @@ export class SolSystem {
     const tS = this.epochMs / 1000;
 
     for (const b of this.bodies) {
+      const px = b.posM.x, py = b.posM.y, pz = b.posM.z;
       if (b.kind === 'planet') {
         const def = b.def as PlanetDef;
         jplPosition(def.elements, T, this.tmp);
@@ -82,6 +86,9 @@ export class SolSystem {
         b.posM.z = b.parent!.posM.z + this.tmp.z;
         b.spin = ((tS / 86400 / def.periodDays) % 1) * 2 * Math.PI; // tidally locked
       }
+      b.deltaM.x = b.posM.x - px;
+      b.deltaM.y = b.posM.y - py;
+      b.deltaM.z = b.posM.z - pz;
     }
   }
 
