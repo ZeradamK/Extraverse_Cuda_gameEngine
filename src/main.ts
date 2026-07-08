@@ -21,7 +21,9 @@ import {
   PLASMA_FULL_W_M2, PLASMA_START_W_M2,
 } from './game/systems/environment';
 import { PlanetTerrain } from './game/terrain/planetTerrain';
+import { loadEarthLandMask } from './game/terrain/landMask';
 import { AtmosphereShell } from './engine/render/atmosphere';
+import { CloudLayer } from './game/vfx/cloudLayer';
 import { LandingGear } from './game/vfx/landingGear';
 import { Dust } from './game/vfx/dust';
 import { ReentryGlow } from './game/vfx/reentryGlow';
@@ -79,14 +81,25 @@ async function init(): Promise<void> {
   const shell = new FarShell(sys.bodies);
   scene.add(shell.group);
 
-  // --- landable terrain (M4: Luna + Mars) ---
+  // --- landable terrain (M4: Luna + Mars; M6: Earth with real continents) ---
+  bootStatus.textContent = 'Building Earth…';
   const luna = sys.bodies.find(b => b.name === 'Luna')!;
   const mars = sys.planets[3];
+  const earthBody = sys.planets[2];
+  const earthMask = await loadEarthLandMask('/textures/planets/2k_earth_daymap.jpg');
   const terrains = [
     new PlanetTerrain(luna, 'luna', 20260706, 0x8a8a8a),
     new PlanetTerrain(mars, 'mars', 19570104, 0xb4653f),
+    new PlanetTerrain(earthBody, 'earth', 19690720, 0xffffff, {
+      realDayTexture: '/textures/planets/2k_earth_daymap.jpg',
+      realNightTexture: '/textures/planets/2k_earth_nightmap.jpg',
+      ocean: true,
+      mask: earthMask,
+    }),
   ];
   for (const t of terrains) scene.add(t.group);
+  const clouds = new CloudLayer(earthBody, '/textures/planets/2k_earth_clouds.jpg');
+  scene.add(clouds.mesh);
 
   // atmosphere shells (§8.3) for every body with an AtmoDef
   const atmospheres = sys.planets
@@ -96,6 +109,13 @@ async function init(): Promise<void> {
 
   const stars = createStarfield();
   scene.add(stars);
+
+  // debug bisect: ?hide=exhaust,stars,shell,atmo,tunnel,dust,glow,gear,terrain
+  const hidden = new Set((new URLSearchParams(location.search).get('hide') ?? '').split(','));
+  if (hidden.has('stars')) stars.visible = false;
+  if (hidden.has('shell')) shell.group.visible = false;
+  if (hidden.has('terrain')) for (const t of terrains) t.group.visible = false;
+  if (hidden.has('atmo')) for (const a of atmospheres) a.mesh.visible = false;
 
   // sun light: direction + intensity computed per frame from real geometry
   const sun = new THREE.DirectionalLight(SUN.COLOR, 8.0);
@@ -148,6 +168,27 @@ async function init(): Promise<void> {
       mars.posM.x + tangent.x * r, mars.posM.y + tangent.y * r, mars.posM.z + tangent.z * r);
     flight.curr.vel.set(0, 0, 0);
     const m = new THREE.Matrix4().lookAt(flight.curr.pos, new THREE.Vector3(0, 0, 0), tangent);
+    flight.curr.quat.setFromRotationMatrix(m);
+    flight.curr.omega.set(0, 0, 0);
+    flight.prev.pos.copy(flight.curr.pos);
+    flight.prev.quat.copy(flight.curr.quat);
+    flight.prev.vel.copy(flight.curr.vel);
+  }
+
+  /** Earth low orbit, night side just past the terminator, nose at the rising sun limb */
+  function spawnEarthSunrise(): void {
+    const b = earthBody;
+    const sunward = new THREE.Vector3(-b.posM.x, -b.posM.y, -b.posM.z).normalize();
+    const east = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), sunward).normalize();
+    // 105° from the subsolar point (just into night), 0.35R altitude
+    const dir = new THREE.Vector3().copy(sunward).multiplyScalar(Math.cos(THREE.MathUtils.degToRad(105)))
+      .addScaledVector(east, Math.sin(THREE.MathUtils.degToRad(105)));
+    const r = b.radiusM * 1.35;
+    flight.curr.pos.set(b.posM.x + dir.x * r, b.posM.y + dir.y * r, b.posM.z + dir.z * r);
+    flight.curr.vel.set(0, 0, 0);
+    // face the sun limb: look toward a point on the horizon in the sun direction
+    tmp.set(b.posM.x + sunward.x * b.radiusM, b.posM.y + sunward.y * b.radiusM, b.posM.z + sunward.z * b.radiusM);
+    const m = new THREE.Matrix4().lookAt(flight.curr.pos, tmp, dir);
     flight.curr.quat.setFromRotationMatrix(m);
     flight.curr.omega.set(0, 0, 0);
     flight.prev.pos.copy(flight.curr.pos);
@@ -241,6 +282,7 @@ async function init(): Promise<void> {
       if (intent.codes.has('Digit9')) spawnAt(luna.posM, luna.radiusM * 1.06); // Luna, ~10 km AGL
       if (intent.codes.has('Digit0')) spawnMarsSunset();
       if (intent.codes.has('Minus')) spawnMarsEntry();
+      if (intent.codes.has('Equal')) spawnEarthSunrise();
 
       // gear tap / autoland hold (N)
       if (intent.pressed.has('ship.gearToggle')) gearRequested = !gearRequested;
@@ -411,10 +453,23 @@ async function init(): Promise<void> {
       const alt = t.update(camPosM);
       t.group.position.add(rig.camera.position); // group pos was planet−cam; offset to camera space
       shell.setBodyVisible(t.body, !t.active);
+      // shader frame: planet center in scene space + sun dir (terminator/albedo drape)
+      tmp.set(
+        t.body.posM.x - camPosM.x, t.body.posM.y - camPosM.y, t.body.posM.z - camPosM.z,
+      ).add(rig.camera.position);
+      const bl = Math.hypot(t.body.posM.x, t.body.posM.y, t.body.posM.z) || 1;
+      t.setShaderFrame(tmp, tmp2.set(-t.body.posM.x / bl, -t.body.posM.y / bl, -t.body.posM.z / bl));
       if (alt !== null) {
         terrainAltitude = alt;
         terrainPatches = t.stats.patches;
       }
+    }
+
+    // Earth cloud layer follows the same camera-relative convention
+    {
+      const b = earthBody;
+      const dx = b.posM.x - camPosM.x, dy = b.posM.y - camPosM.y, dz = b.posM.z - camPosM.z;
+      clouds.update(dtReal, tmp.set(dx, dy, dz).add(rig.camera.position), Math.hypot(dx, dy, dz));
     }
 
     // far shell + stars around the camera
@@ -465,6 +520,19 @@ async function init(): Promise<void> {
       a.update(tmp, tmp2, dist);
     }
     if (flight.boosting) rig.trauma = Math.max(rig.trauma, 0.35);
+
+    // re-assert debug hides (systems flip visibility per frame)
+    if (hidden.size > 1) {
+      if (hidden.has('stars')) stars.visible = false;
+      if (hidden.has('shell')) shell.group.visible = false;
+      if (hidden.has('terrain')) for (const t of terrains) t.group.visible = false;
+      if (hidden.has('atmo')) for (const a of atmospheres) a.mesh.visible = false;
+      if (hidden.has('exhaust')) exhaust.group.visible = false;
+      if (hidden.has('tunnel')) tunnel.object.visible = false;
+      if (hidden.has('dust')) dust.group.visible = false;
+      if (hidden.has('glow')) glow.mesh.visible = false;
+      if (hidden.has('gear')) gear.group.visible = false;
+    }
 
     postfx.render();
 
