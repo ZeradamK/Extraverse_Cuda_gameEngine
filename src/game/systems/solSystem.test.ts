@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SolSystem } from './solSystem';
+import { SolSystem, bodyOrientation } from './solSystem';
 import { SYSTEM_SCALE, AU_M } from '../../data/solarSystem';
 
 const EPOCH = Date.UTC(2026, 6, 6); // fixed for determinism
@@ -127,5 +127,81 @@ describe('SolSystem.sunVisibility (eclipses)', () => {
       z: earth.posM.z - u.z * earth.radiusM * 3,
     };
     expect(sys.sunVisibility(p)).toBe(1);
+  });
+});
+
+describe('bodyOrientation (audit regressions)', () => {
+  const Q = () => new (class {
+    x = 0; y = 0; z = 0; w = 1;
+    setFromAxisAngle(a: { x: number; y: number; z: number }, r: number) {
+      const s = Math.sin(r / 2);
+      this.x = a.x * s; this.y = a.y * s; this.z = a.z * s; this.w = Math.cos(r / 2);
+      return this;
+    }
+    multiply(q: { x: number; y: number; z: number; w: number }) {
+      const { x, y, z, w } = this;
+      this.x = w * q.x + x * q.w + y * q.z - z * q.y;
+      this.y = w * q.y - x * q.z + y * q.w + z * q.x;
+      this.z = w * q.z + x * q.y - y * q.x + z * q.w;
+      this.w = w * q.w - x * q.x - y * q.y - z * q.z;
+      return this;
+    }
+    rotY(v: { x: number; y: number; z: number }) { // rotate vector by this quat
+      const { x, y, z, w } = this;
+      const ix = w * v.x + y * v.z - z * v.y;
+      const iy = w * v.y + z * v.x - x * v.z;
+      const iz = w * v.z + x * v.y - y * v.x;
+      const iw = -x * v.x - y * v.y - z * v.z;
+      return {
+        x: ix * w + iw * -x + iy * -z - iz * -y,
+        y: iy * w + iw * -y + iz * -x - ix * -z,
+        z: iz * w + iw * -z + ix * -y - iy * -x,
+      };
+    }
+  })();
+
+  it('Earth pole stays at exactly 23.44° obliquity and DOES NOT precess with spin', () => {
+    const s = new SolSystem(EPOCH);
+    const earth = s.planets[2];
+    const poleAt = (spin: number) => {
+      const q = Q(), scratch = Q();
+      bodyOrientation({ ...earth, spin, wobble: 0 }, q, scratch);
+      return q.rotY({ x: 0, y: 1, z: 0 });
+    };
+    const p0 = poleAt(0);
+    const p1 = poleAt(2.1); // different spin phase
+    const ang0 = Math.acos(p0.y) * 180 / Math.PI;
+    expect(ang0).toBeCloseTo(23.44, 1);
+    // the pole is FIXED as the planet spins (the old Euler order made it precess)
+    expect(Math.hypot(p1.x - p0.x, p1.y - p0.y, p1.z - p0.z)).toBeLessThan(1e-9);
+  });
+
+  it('Venus reads retrograde via its 177° tilt with positive spin rate', () => {
+    const s = new SolSystem(EPOCH);
+    const venus = s.planets[1];
+    s.update(3600);
+    expect(venus.spin).toBeGreaterThan(0); // |rotationHours| — no double negation
+    expect(venus.axialTiltRad * 180 / Math.PI).toBeCloseTo(177.36, 1);
+  });
+});
+
+describe('surfaceVelocity (audit: landed co-rotation)', () => {
+  it('Earth equator ground speed ≈ 46.4 m/s at 1/10 scale', async () => {
+    const { surfaceVelocity } = await import('./environment');
+    const R = 637_100; // scaled Earth radius, m
+    const out = { x: 0, y: 0, z: 0 };
+    // point on the tilted equator: r ⊥ spin axis; use r along +X (always ⊥ axis)
+    surfaceVelocity((23.44 * Math.PI) / 180, 23.9345, R, 0, 0, out);
+    const speed = Math.hypot(out.x, out.y, out.z);
+    expect(speed).toBeCloseTo((2 * Math.PI * R) / (23.9345 * 3600), 3);
+    expect(speed).toBeGreaterThan(46);
+    expect(speed).toBeLessThan(47);
+  });
+  it('is perpendicular to both the axis and the radius (Ω × r)', async () => {
+    const { surfaceVelocity } = await import('./environment');
+    const out = { x: 0, y: 0, z: 0 };
+    surfaceVelocity(0.5, 24, 1000, 2000, -500, out);
+    // v · r = 0
+    expect(out.x * 1000 + out.y * 2000 + out.z * -500).toBeCloseTo(0, 6);
   });
 });

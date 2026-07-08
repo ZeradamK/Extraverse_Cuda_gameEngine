@@ -23,6 +23,21 @@ export interface BodyState {
   axialTiltRad: number;
 }
 
+/**
+ * THE body orientation (audit fix): q = tilt(X) · spin(localY) · wobble(localX).
+ * One construction shared by proxy, terrain, collision, anchors — eliminates
+ * the Euler-order pole precession and the 23° proxy↔terrain tilt snap.
+ * Retrograde is encoded by tilt > 90° (IAU), so spin uses |rotationHours|.
+ */
+export function bodyOrientation(b: BodyState, out: {
+  setFromAxisAngle(a: { x: number; y: number; z: number }, r: number): unknown;
+  multiply(q: unknown): unknown;
+}, scratch: { setFromAxisAngle(a: { x: number; y: number; z: number }, r: number): unknown }): void {
+  out.setFromAxisAngle({ x: 1, y: 0, z: 0 }, b.axialTiltRad);
+  out.multiply(scratch.setFromAxisAngle({ x: 0, y: 1, z: 0 }, b.spin));
+  if (b.wobble !== 0) out.multiply(scratch.setFromAxisAngle({ x: 1, y: 0, z: 0 }, b.wobble));
+}
+
 export class SolSystem {
   readonly bodies: BodyState[] = [];
   readonly sun: BodyState;
@@ -77,7 +92,7 @@ export class SolSystem {
         b.posM.x = this.tmp.x * SYSTEM_SCALE;
         b.posM.y = this.tmp.y * SYSTEM_SCALE;
         b.posM.z = this.tmp.z * SYSTEM_SCALE;
-        b.spin = ((tS / 3600 / def.rotationHours) % 1) * 2 * Math.PI;
+        b.spin = ((tS / 3600 / Math.abs(def.rotationHours)) % 1) * 2 * Math.PI; // retro via tilt>90 (IAU), not sign
       } else if (b.kind === 'moon') {
         const def = b.def as MoonDef;
         // orbital PERIOD kept real; radius scaled — keeps moons inside SOI at 1/10 scale
@@ -89,7 +104,7 @@ export class SolSystem {
         const orbitAngle = ((tS / 86400 / def.periodDays) % 1) * 2 * Math.PI;
         // tidal lock + optical libration: uniform rotation vs non-uniform orbit
         // gives a ±2e longitude wobble; axial tilt to the orbit gives a latitude nod
-        b.spin = orbitAngle + (def.librLonRad ?? 0) * Math.sin(orbitAngle);
+        b.spin = orbitAngle - (def.librLonRad ?? 0) * Math.sin(orbitAngle); // audit: sign matches ν−M ≈ +2e·sinM
         b.wobble = (def.librLatRad ?? 0) * Math.sin(orbitAngle + Math.PI / 3);
       }
       b.deltaM.x = b.posM.x - px;
