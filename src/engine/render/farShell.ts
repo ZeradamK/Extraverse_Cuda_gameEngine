@@ -6,6 +6,7 @@
  * All position math in f64; only small camera-relative deltas hit the GPU.
  */
 import * as THREE from 'three/webgpu';
+import { color, float, normalWorld, smoothstep, texture as texNode, uniform } from 'three/tsl';
 import type { Vec3d } from '../math/kepler';
 import type { BodyState } from '../../game/systems/solSystem';
 import type { PlanetDef, MoonDef } from '../../data/solarSystem';
@@ -15,6 +16,7 @@ const R_SHELL = 9000; // m — inside camera far (5e4), beyond any near geometry
 export class FarShell {
   readonly group = new THREE.Group();
   private proxies = new Map<BodyState, THREE.Group>();
+  private sunUniforms = new Map<BodyState, { value: THREE.Vector3 }>();
   private sunMesh!: THREE.Mesh;
   private loader = new THREE.TextureLoader();
 
@@ -78,9 +80,15 @@ export class FarShell {
 
     const pd = def as PlanetDef;
     if (pd.emissiveNight) {
-      mat.emissiveMap = this.tex(pd.emissiveNight);
-      mat.emissive = new THREE.Color(0xffffff);
-      mat.emissiveIntensity = 1.2; // visible on the dark side, bloom picks it up
+      // terminator-blended night lights (M6): emissive only past the twilight band
+      const nodeMat = new THREE.MeshStandardNodeMaterial({ roughness: 1, metalness: 0 });
+      nodeMat.colorNode = texNode(this.tex(pd.texture)).mul(color(0xffffff));
+      const uSun = uniform(new THREE.Vector3(0, 1, 0));
+      this.sunUniforms.set(b, uSun);
+      const dayFactor = smoothstep(-0.12, 0.12, normalWorld.dot(uSun));
+      nodeMat.emissiveNode = texNode(this.tex(pd.emissiveNight!)).mul(float(1.0).sub(dayFactor)).mul(1.4);
+      sphere.material = nodeMat as unknown as THREE.MeshStandardMaterial;
+      (mat as THREE.Material).dispose();
     }
     if (pd.clouds) {
       const cloudMat = new THREE.MeshStandardMaterial({
@@ -140,6 +148,11 @@ export class FarShell {
       const sphere = g.children[0] as THREE.Mesh;
       sphere.rotation.z = b.axialTiltRad;
       sphere.rotation.y = b.spin;
+      const uSun = this.sunUniforms.get(b);
+      if (uSun) {
+        const l = Math.hypot(b.posM.x, b.posM.y, b.posM.z) || 1;
+        uSun.value.set(-b.posM.x / l, -b.posM.y / l, -b.posM.z / l); // body → sun
+      }
       const clouds = g.getObjectByName('clouds');
       if (clouds) clouds.rotation.y = b.spin * 0.85;
       order.push({ g, d });
