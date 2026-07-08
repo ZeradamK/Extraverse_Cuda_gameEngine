@@ -13,15 +13,18 @@
 import * as THREE from 'three/webgpu';
 import {
   builtinAOContext, mrt, output, emissive, packNormalToRGB, pass, sample,
-  screenUV, unpackRGBToNormal, normalView, vec4, velocity,
+  screenUV, uniform, unpackRGBToNormal, normalView, vec4, velocity,
 } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { chromaticAberration } from 'three/addons/tsl/display/ChromaticAberrationNode.js';
 
 export interface PostFX {
   pipeline: THREE.RenderPipeline;
   render(): void;
+  /** 0..~1: warp chromatic aberration strength */
+  warpCA: { value: number };
 }
 
 export function createPostFX(
@@ -58,7 +61,13 @@ export function createPostFX(
   const traaPass = traa(scenePass, prePassDepth, prePassVelocity, camera);
   const bloomPass = bloom(scenePass.getTextureNode('emissive'), 0.8, 0.3);
 
-  pipeline.outputNode = traaPass.add(bloomPass);
+  // warp-driven chromatic aberration over the final composite.
+  // NOTE: center must be explicit — the helper's `center = null` default crashes
+  // the node build despite docs claiming it means screen center (r185 bug).
+  const warpCA = uniform(0.0);
+  pipeline.outputNode = chromaticAberration(
+    traaPass.add(bloomPass), warpCA, uniform(new THREE.Vector2(0.5, 0.5)), uniform(1.06),
+  );
 
-  return { pipeline, render: () => void pipeline.render() };
+  return { pipeline, render: () => void pipeline.render(), warpCA };
 }

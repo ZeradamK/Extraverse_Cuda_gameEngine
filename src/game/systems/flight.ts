@@ -57,7 +57,8 @@ export class ShipFlight {
   private tmpV = new THREE.Vector3();
   private tmpV2 = new THREE.Vector3();
 
-  step(dt: number, intent: IntentFrame): void {
+  step(dt: number, intent: IntentFrame, opts?: { steerScale?: number; skipTranslation?: boolean }): void {
+    const steerScale = opts?.steerScale ?? 1;
     const c = this.curr;
     this.prev.pos.copy(c.pos);
     this.prev.vel.copy(c.vel);
@@ -85,7 +86,7 @@ export class ShipFlight {
       -stickPitch * ANG_MAX.pitch, // +X body rotation = nose up
       -stickYaw * ANG_MAX.yaw,     // +Y body rotation = nose left
       -stickRoll * ANG_MAX.roll,
-    );
+    ).multiplyScalar(steerScale);
     const alpha = this.tmpV2.subVectors(target, c.omega).divideScalar(TAU_ROT);
     alpha.x = THREE.MathUtils.clamp(alpha.x, -ANG_AUTH.pitch * boost, ANG_AUTH.pitch * boost);
     alpha.y = THREE.MathUtils.clamp(alpha.y, -ANG_AUTH.yaw * boost, ANG_AUTH.yaw * boost);
@@ -97,7 +98,12 @@ export class ShipFlight {
     this.tmpQ.set(w.x * dt * 0.5, w.y * dt * 0.5, w.z * dt * 0.5, 1).normalize();
     c.quat.multiply(this.tmpQ).normalize();
 
-    // --- translation ---
+    // --- translation (skipped while warp owns it) ---
+    if (opts?.skipTranslation) {
+      this.aCmdBody.set(0, 0, 0);
+      this.visualThrottle += (0.85 - this.visualThrottle) * Math.min(1, 6 * dt);
+      return;
+    }
     const sx = intent.axes['ship.strafeX'] ?? 0;
     const sy = intent.axes['ship.strafeY'] ?? 0;
     const sz = intent.axes['ship.strafeZ'] ?? 0; // -1 = forward (W)
