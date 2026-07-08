@@ -88,7 +88,10 @@ async function init(): Promise<void> {
   const earthBody = sys.planets[2];
   const earthMask = await loadEarthLandMask('/textures/planets/2k_earth_daymap.jpg');
   const terrains = [
-    new PlanetTerrain(luna, 'luna', 20260706, 0x8a8a8a),
+    // Luna: real 8k albedo draped over the crater heightfield
+    new PlanetTerrain(luna, 'luna', 20260706, 0xffffff, {
+      realDayTexture: '/textures/planets/8k_moon.jpg',
+    }),
     new PlanetTerrain(mars, 'mars', 19570104, 0xb4653f),
     new PlanetTerrain(earthBody, 'earth', 19690720, 0xffffff, {
       realDayTexture: '/textures/planets/2k_earth_daymap.jpg',
@@ -366,11 +369,21 @@ async function init(): Promise<void> {
       heatFlux += (rawHeat - heatFlux) * Math.min(1, 4 * DT);
       if (qDyn > 5000) rig.trauma = Math.max(rig.trauma, Math.min(0.45, qDyn / 60_000));
 
+      // NAV safety ceiling: distance-slaved to the nearest surface (never cruise into a planet)
+      let navCap = Infinity;
+      if (body) {
+        const dSurf = Math.hypot(
+          body.posM.x - flight.curr.pos.x,
+          body.posM.y - flight.curr.pos.y,
+          body.posM.z - flight.curr.pos.z) - body.radiusM;
+        navCap = Math.max(250, dSurf / 4);
+      }
       flight.step(DT, intent, {
         steerScale: warp.steerScale,
         skipTranslation: warpOwns,
         externalAccel: extAccel,
         suppressAssist: autoland.state === 'DESCEND' || autoland.state === 'FINAL',
+        navCap,
       });
       // LANDED: pin to the surface (rest on gear); thrust breaks the pin
       if (landedPin && body) {
@@ -577,6 +590,7 @@ async function init(): Promise<void> {
       heat01: THREE.MathUtils.clamp(heatFlux / PLASMA_FULL_W_M2, 0, 1),
       inAtmosphere: inAtmo,
       obstructed: warp.obstructed,
+      navMode: flight.navMode,
     });
     map.draw(sys, renderPos);
 

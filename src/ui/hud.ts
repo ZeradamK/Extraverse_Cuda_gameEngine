@@ -38,7 +38,7 @@ export class Hud {
     cockpit: boolean; locked: boolean;
     targetName?: string; targetDistM?: number; warpState?: string; warpEtaS?: number;
     altAGL?: number | null; vRadial?: number; gearDown?: boolean; autoland?: string; heat01?: number;
-    inAtmosphere?: boolean; obstructed?: boolean;
+    inAtmosphere?: boolean; obstructed?: boolean; navMode?: boolean;
   }): void {
     const { ctx } = this;
     const w = window.innerWidth, h = window.innerHeight;
@@ -85,7 +85,10 @@ export class Hud {
     // left block: speed + G + landing data
     ctx.fillStyle = CYAN;
     ctx.textAlign = 'right';
-    ctx.fillText(`${o.speed.toFixed(0)} m/s`, cx - 90, cy + 4);
+    const speedTxt = o.speed >= 10_000
+      ? `${(o.speed / 1000).toFixed(o.speed >= 1e6 ? 0 : 1)} km/s`
+      : `${o.speed.toFixed(0)} m/s`;
+    ctx.fillText(speedTxt, cx - 90, cy + 4);
     ctx.fillStyle = o.gForce > 6 ? AMBER : CYAN_DIM;
     ctx.fillText(`${o.gForce.toFixed(1)} G`, cx - 90, cy + 22);
     if (o.altAGL !== null && o.altAGL !== undefined) {
@@ -111,6 +114,10 @@ export class Hud {
     ctx.fillText(o.flightAssist ? 'FA ON' : 'FA OFF', cx + 90, cy - 14);
     ctx.fillStyle = o.decoupled ? AMBER : CYAN_DIM;
     ctx.fillText(o.decoupled ? 'DECOUPLED' : 'COUPLED', cx + 90, cy + 4);
+    if (o.navMode) {
+      ctx.fillStyle = AMBER;
+      ctx.fillText('NAV CRUISE', cx + 190, cy + 4);
+    }
     ctx.fillStyle = CYAN_DIM;
     ctx.fillText(o.cockpit ? 'COCKPIT' : 'CHASE', cx + 90, cy + 22);
     if (o.gearDown !== undefined) {
