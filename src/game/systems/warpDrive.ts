@@ -4,7 +4,7 @@
  * Stateless cap → automatic slowdown near masses and overshoot-proof arrival.
  * States: IDLE → SPOOL (3 s, must hold alignment) → WARP → drop (auto or manual).
  */
-import * as THREE from 'three/webgpu';
+import * as THREE from 'three';
 import type { SolSystem, BodyState } from './solSystem';
 import type { ShipFlight } from './flight';
 
