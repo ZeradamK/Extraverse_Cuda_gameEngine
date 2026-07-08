@@ -6,10 +6,11 @@
  */
 import { createNoise3D, type NoiseFunction3D } from 'simplex-noise';
 import { hash, mulberry32 } from '../../engine/math/rng';
+import { landAtDir, type LandMask } from './landMask';
 
 export interface Vec3 { x: number; y: number; z: number }
 
-export type PlanetKind = 'luna' | 'mars';
+export type PlanetKind = 'luna' | 'mars' | 'earth';
 
 export interface HeightField {
   /** height above datum (scaled m) for a unit direction from planet center */
@@ -91,9 +92,26 @@ function smoothMax(a: number, b: number, k: number): number {
   return -smoothMin(-a, -b, k);
 }
 
-export function createHeightField(kind: PlanetKind, seed: number): HeightField {
+export function createHeightField(kind: PlanetKind, seed: number, mask?: LandMask): HeightField {
   const n1 = createNoise3D(mulberry32(hash(seed, 1)));
   const n2 = createNoise3D(mulberry32(hash(seed, 2)));
+
+  if (kind === 'earth') {
+    // real continents: land mask from the Blue Marble texture gates the relief.
+    // Land rises above datum (ocean surface = datum sphere); seafloor dips below.
+    const maxAmp = 1400;
+    return {
+      maxAmp,
+      height(dir: Vec3): number {
+        const land = mask ? landAtDir(mask, dir) : 0.5; // soft 0..1 at shores
+        const hills = (fbm(n1, dir.x * 6, dir.y * 6, dir.z * 6, 6) * 0.5 + 0.5) * 700;
+        const mountains = ridged(n2, dir.x * 14, dir.y * 14, dir.z * 14, 5) * 650;
+        const landH = 40 + hills + mountains * Math.max(0, land - 0.4) * 1.6;
+        const oceanH = -900 + hills * 0.15;
+        return oceanH + (landH - oceanH) * land;
+      },
+    };
+  }
 
   if (kind === 'luna') {
     // Luna (scaled): broad maria/highlands ±260 m, ridged detail, two crater tiers
