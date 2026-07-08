@@ -4,6 +4,7 @@
  * thin postMessage shell around buildPatch().
  */
 import { createHeightField, type PlanetKind } from './heightfield';
+import type { LandMask } from './landMask';
 
 export interface PatchRequest {
   id: number;
@@ -45,9 +46,9 @@ function warp(t: number): number {
   return Math.tan(t * (Math.PI / 4)) / Math.tan(Math.PI / 4);
 }
 
-export function buildPatch(req: PatchRequest): PatchResult {
+export function buildPatch(req: PatchRequest, mask?: LandMask): PatchResult {
   const { radiusM, face, level, ix, iy } = req;
-  const hf = createHeightField(req.kind, req.seed);
+  const hf = createHeightField(req.kind, req.seed, mask);
   const n = 1 << level;
   const size = 2 / n; // face-uv span of this node
   const u0 = -1 + ix * size;
