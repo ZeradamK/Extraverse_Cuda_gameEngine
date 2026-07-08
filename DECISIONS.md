@@ -85,3 +85,12 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - **Earth–Moon distance** was already scientifically exact (384,400 km × 0.1 scale): now asserted in tests including the scale-invariant truths — 60.34 Earth radii separation, 0.518° lunar disc.
 - **NAV cruise (C)**: coupled ceiling lifts 250 m/s → 4000 mi/s (6,437 km/s ≈ 2.1% c) with damper fiction (30 km/s² assist) and a distance-slaved safety cap (dSurface/4) so cruising at a planet auto-brakes instead of lithobraking. Spooldown: dampers stay hot above 1 km/s after NAV exit — braking from cruise on RCS would take a day (test-caught). Moons are warp/NAV targets now (cycle includes them).
 - E2E: NAV 552 km/s from LEO PASS; warp to Luna arrival at 346 km PASS; obstruction refusal + retry pattern validated in-script. 96 unit tests.
+
+## User meshes, motion perception, stability (2026-07-07)
+
+- **User glTFs are now THE Earth and Moon**: `celestialMeshes.ts` extracts sphere geometry from photoreal_earth.gltf ('Earth' node, 16k verts) and moon_rotation_wobble.gltf ('Sphere', 4k verts), unit-normalized, passed as FarShell geometry overrides. Their meshes are higher-res than the old proxies; Spline's UVs map our equirect textures correctly (verified visually).
+- **Relative-motion perception** (user-reported "ship doesn't look like it's moving"): the ship is origin-pinned by design, and space has no nearby references. Added SC-style cues: `SpaceDust` — 350 world-anchored motes in a 220 m wrapping bubble rendered as velocity streaks (length/opacity ∝ speed, hidden in warp), and cosmetic banking lean on the ship visual (roll ∝ yaw rate, pitch ∝ pitch rate; sim untouched).
+- **Terrain LOD resolve-skip**: re-resolve only when the camera moves > 0.4% of its distance since the last resolve — kills the 31 fps churn dip when receding at cruise speed AND per-frame work while hovering.
+- **8k moon texture crashed headless Chrome** (134 MB decoded in the GPU process): proxy uses 2k, terrain drape 4k. Rule of thumb: keep per-texture decode ≤ ~50 MB.
+- **Headless Chrome WebGPU is flaky** (GPU process death after ~40 s under load even post-diet); headed Playwright is rock stable (60 fps vsync). E2E policy: logic asserts headless where possible, screenshots/long soak via `headless: false`.
+- NAV HUD shows honest damper G (3000+ G at full NAV accel) — fiction says inertial dampers; revisit display clamp in M9 polish.
