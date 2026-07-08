@@ -45,8 +45,27 @@ export class WarpDrive {
     return Math.hypot(this.target.posM.x - p.x, this.target.posM.y - p.y, this.target.posM.z - p.z);
   }
 
+  /** true when a body blocks the straight path to the target (SC "OBSTRUCTED") */
+  get obstructed(): boolean {
+    if (!this.target) return false;
+    const p = this.flight.curr.pos;
+    const tx = this.target.posM.x - p.x;
+    const ty = this.target.posM.y - p.y;
+    const tz = this.target.posM.z - p.z;
+    const len = Math.hypot(tx, ty, tz) || 1;
+    for (const b of this.sys.bodies) {
+      if (b === this.target || b.kind === 'star') continue;
+      // closest approach of the segment ship→target to the body center
+      const bx = b.posM.x - p.x, by = b.posM.y - p.y, bz = b.posM.z - p.z;
+      const t = Math.max(0, Math.min(len, (bx * tx + by * ty + bz * tz) / len));
+      const cx = bx - (tx / len) * t, cy = by - (ty / len) * t, cz = bz - (tz / len) * t;
+      if (Math.hypot(cx, cy, cz) < b.radiusM * 2) return true;
+    }
+    return false;
+  }
+
   requestSpool(): void {
-    if (this.state === 'IDLE' && this.target) {
+    if (this.state === 'IDLE' && this.target && !this.obstructed) {
       this.state = 'SPOOL';
       this.spoolT = 0;
     } else if (this.state === 'WARP') {
@@ -93,7 +112,14 @@ export class WarpDrive {
         // nearest body surface distance (excluding target when far)
         let dBody = Infinity;
         for (const b of this.sys.bodies) {
-          const d = Math.hypot(b.posM.x - p.x, b.posM.y - p.y, b.posM.z - p.z) - b.radiusM * 2;
+          const dc = Math.hypot(b.posM.x - p.x, b.posM.y - p.y, b.posM.z - p.z);
+          // mass-lock: flying INTO a body's exclusion zone = emergency drop
+          // (Elite-style — the V_MIN floor would otherwise punch through planets)
+          if (b !== this.target && dc < b.radiusM * 1.6) {
+            this.drop(true);
+            return false;
+          }
+          const d = dc - b.radiusM * 2;
           if (d < dBody) dBody = d;
         }
         this.vCap = THREE.MathUtils.clamp(Math.min(dBody, dTgt) / T_BRAKE, V_MIN, V_MAX);

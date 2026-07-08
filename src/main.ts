@@ -17,7 +17,7 @@ import { SolSystem } from './game/systems/solSystem';
 import { WarpDrive } from './game/systems/warpDrive';
 import { Autoland } from './game/systems/autoland';
 import {
-  density, dragAccel, dynamicPressure, gravityAccel, suttonGraves,
+  density, dragAccel, dynamicPressure, gravityAccel, spaceAltitude, suttonGraves,
   PLASMA_FULL_W_M2, PLASMA_START_W_M2,
 } from './game/systems/environment';
 import { PlanetTerrain } from './game/terrain/planetTerrain';
@@ -155,9 +155,11 @@ async function init(): Promise<void> {
   const hud = new Hud(document.body);
   const map = new SystemMap(document.body);
 
-  // spawn: sunward of Earth, 8 radii out, facing the planet
+  // spawn: LOW Earth orbit on the dayside — the planet LOOMS (fills half the
+  // sky at 0.45R altitude), Star Citizen style. Scale reads instantly.
   const earth = sys.planets[2];
-  spawnAt(earth.posM, earth.radiusM * 8);
+  spawnAt(earth.posM, earth.radiusM * 1.45);
+  warp.target = earth; // pre-targeted: B warps, G cycles
 
   /** Mars terminator, 4 km AGL, nose at the setting sun — the M5 money shot */
   function spawnMarsSunset(): void {
@@ -238,6 +240,7 @@ async function init(): Promise<void> {
   let heatFlux = 0;          // W/m², smoothed
   let landedPin = false;
   let lastDust = 0;
+  let inAtmo = false;        // below the body's Kármán-analog line
   const renderPos = new THREE.Vector3();   // f64 world (JS numbers)
   const renderQuat = new THREE.Quaternion();
   const camPosM = new THREE.Vector3();
@@ -319,6 +322,11 @@ async function init(): Promise<void> {
         }
         // atmosphere
         const altDatum = dCenter - body.radiusM;
+        const nowInAtmo = !!def.atmo && altDatum < spaceAltitude(def.atmo);
+        if (nowInAtmo && !inAtmo && flight.speed > 250) {
+          rig.trauma = Math.max(rig.trauma, 0.35); // ENTRY INTERFACE buffet (§10 beat)
+        }
+        inAtmo = nowInAtmo;
         if (def.atmo && altDatum < def.atmo.topM) {
           const rho = density(def.atmo, altDatum);
           const speed = flight.curr.vel.length(); // frame-carried → body-relative
@@ -382,9 +390,10 @@ async function init(): Promise<void> {
       }
       warpOwns = warp.step(DT);
 
-      // terrain collision clamp: never let the ship penetrate the surface
+      // terrain collision clamp: never let the ship penetrate the surface.
+      // (skipped while warp owns translation — the drive's mass-lock handles bodies)
       for (const t of terrains) {
-        if (!t.active) continue;
+        if (warpOwns || !t.active) continue;
         const b = t.body;
         const rx = flight.curr.pos.x - b.posM.x;
         const ry = flight.curr.pos.y - b.posM.y;
@@ -407,8 +416,10 @@ async function init(): Promise<void> {
     }
     sys.update(dtReal); // rails are analytic — real-rate epoch advance
 
-    // local-frame carry (§9.6): near a body, the ship rides the body's frame —
-    // otherwise the planet's own 3 km/s heliocentric rail motion "blows the ship away"
+    // local-frame carry (§9.6): near a body, the ship rides the body's frame.
+    // Zone = 60 radii: outside it a planet's ~3 km/s rail motion OUTRUNS the
+    // 250 m/s thruster cap and the planet is literally unreachable — warp is
+    // how you cross interplanetary space, normal flight lives in the body frame.
     if (warp.state !== 'WARP') {
       let carrier: typeof sys.bodies[number] | null = null;
       let best = Infinity;
@@ -416,7 +427,7 @@ async function init(): Promise<void> {
         if (b.kind === 'star') continue;
         const d = Math.hypot(
           b.posM.x - flight.curr.pos.x, b.posM.y - flight.curr.pos.y, b.posM.z - flight.curr.pos.z);
-        if (d < b.radiusM * 3 && d < best) { best = d; carrier = b; }
+        if (d < b.radiusM * 60 && d < best) { best = d; carrier = b; }
       }
       if (carrier) {
         for (const s of [flight.curr.pos, flight.prev.pos]) {
@@ -564,11 +575,14 @@ async function init(): Promise<void> {
       gearDown: gear.deploy01 > 0.5,
       autoland: autoland.state,
       heat01: THREE.MathUtils.clamp(heatFlux / PLASMA_FULL_W_M2, 0, 1),
+      inAtmosphere: inAtmo,
+      obstructed: warp.obstructed,
     });
     map.draw(sys, renderPos);
 
     // E2E test hook: sim state snapshot (read by scripts/verify-*.mjs)
     (window as unknown as { __XV: object }).__XV = {
+      target: warp.target?.name ?? null,
       autoland: autoland.state,
       gearDeploy: gear.deploy01,
       landedPin,
