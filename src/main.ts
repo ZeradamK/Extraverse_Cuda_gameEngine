@@ -15,6 +15,7 @@ import { InputSystem } from './engine/core/input';
 import { ShipFlight } from './game/systems/flight';
 import { SolSystem } from './game/systems/solSystem';
 import { WarpDrive } from './game/systems/warpDrive';
+import { PlanetTerrain } from './game/terrain/planetTerrain';
 import { Exhaust } from './game/vfx/exhaust';
 import { WarpTunnel } from './game/vfx/warpTunnel';
 import { createStarfield } from './game/vfx/starfield';
@@ -67,6 +68,15 @@ async function init(): Promise<void> {
   const sys = new SolSystem(Date.now());
   const shell = new FarShell(sys.bodies);
   scene.add(shell.group);
+
+  // --- landable terrain (M4: Luna + Mars) ---
+  const luna = sys.bodies.find(b => b.name === 'Luna')!;
+  const mars = sys.planets[3];
+  const terrains = [
+    new PlanetTerrain(luna, 'luna', 20260706, 0x8a8a8a),
+    new PlanetTerrain(mars, 'mars', 19570104, 0xb4653f),
+  ];
+  for (const t of terrains) scene.add(t.group);
 
   const stars = createStarfield();
   scene.add(stars);
@@ -156,11 +166,54 @@ async function init(): Promise<void> {
       for (let d = 1; d <= 8; d++) {
         if (intent.codes.has(`Digit${d}`)) spawnAt(sys.planets[d - 1].posM, sys.planets[d - 1].radiusM * 6);
       }
+      if (intent.codes.has('Digit9')) spawnAt(luna.posM, luna.radiusM * 1.06); // Luna, ~10 km AGL
       flight.step(DT, intent, { steerScale: warp.steerScale, skipTranslation: warpOwns });
       warpOwns = warp.step(DT);
+
+      // terrain collision clamp: never let the ship penetrate the surface
+      for (const t of terrains) {
+        if (!t.active) continue;
+        const b = t.body;
+        const rx = flight.curr.pos.x - b.posM.x;
+        const ry = flight.curr.pos.y - b.posM.y;
+        const rz = flight.curr.pos.z - b.posM.z;
+        const d = Math.hypot(rx, ry, rz);
+        if (d > b.radiusM * 1.5) continue;
+        tmp.set(rx / d, ry / d, rz / d);
+        const surf = t.surfaceRadiusAt(tmp) + 4; // keep belly 4 m off the deck
+        if (d < surf) {
+          flight.curr.pos.set(
+            b.posM.x + tmp.x * surf, b.posM.y + tmp.y * surf, b.posM.z + tmp.z * surf);
+          const vr = flight.curr.vel.dot(tmp);
+          if (vr < 0) {
+            flight.curr.vel.addScaledVector(tmp, -vr); // kill inward radial velocity
+            rig.trauma = Math.max(rig.trauma, Math.min(0.6, -vr / 60));
+          }
+        }
+      }
       acc -= DT;
     }
     sys.update(dtReal); // rails are analytic — real-rate epoch advance
+
+    // local-frame carry (§9.6): near a body, the ship rides the body's frame —
+    // otherwise the planet's own 3 km/s heliocentric rail motion "blows the ship away"
+    if (warp.state !== 'WARP') {
+      let carrier: typeof sys.bodies[number] | null = null;
+      let best = Infinity;
+      for (const b of sys.bodies) {
+        if (b.kind === 'star') continue;
+        const d = Math.hypot(
+          b.posM.x - flight.curr.pos.x, b.posM.y - flight.curr.pos.y, b.posM.z - flight.curr.pos.z);
+        if (d < b.radiusM * 3 && d < best) { best = d; carrier = b; }
+      }
+      if (carrier) {
+        for (const s of [flight.curr.pos, flight.prev.pos]) {
+          s.x += carrier.deltaM.x;
+          s.y += carrier.deltaM.y;
+          s.z += carrier.deltaM.z;
+        }
+      }
+    }
 
     // interpolate sim state (f64 all the way)
     const alpha = acc / DT;
@@ -180,6 +233,19 @@ async function init(): Promise<void> {
     postfx.warpCA.value = 0.65 * warp.factor * warp.factor;
     if (warp.state === 'SPOOL') rig.trauma = Math.max(rig.trauma, 0.1 + 0.25 * (warp.spoolT / 3));
     if (warp.state === 'WARP' && warp.factor > 0.9) rig.trauma = Math.max(rig.trauma, 0.12);
+
+    // terrain: LOD select + camera-relative placement; hide proxy when active
+    let terrainAltitude: number | null = null;
+    let terrainPatches = 0;
+    for (const t of terrains) {
+      const alt = t.update(camPosM);
+      t.group.position.add(rig.camera.position); // group pos was planet−cam; offset to camera space
+      shell.setBodyVisible(t.body, !t.active);
+      if (alt !== null) {
+        terrainAltitude = alt;
+        terrainPatches = t.stats.patches;
+      }
+    }
 
     // far shell + stars around the camera
     shell.update(camPosM);
@@ -237,11 +303,15 @@ async function init(): Promise<void> {
       const maxC = Math.max(Math.abs(renderPos.x), Math.abs(renderPos.y), Math.abs(renderPos.z), 1);
       const ulp32 = 2 ** (Math.floor(Math.log2(maxC)) - 23);
       const r = renderer.info.render;
+      const terrainLine = terrainAltitude !== null
+        ? `\nALT ${fmtDist(Math.max(0, terrainAltitude))} AGL · ${terrainPatches} patches`
+        : '';
       debugEl.textContent =
-        `EXTRAVERSE M2 sol · ${backend}\n` +
+        `EXTRAVERSE M4 · ${backend}\n` +
         `${fps.toFixed(0)} fps · ${r.drawCalls} draws · ${(r.triangles / 1000).toFixed(0)}k tris\n` +
         `${nearest.name} ${fmtDist(nd)} · sun ${dAU.toFixed(2)} AU · eclipse ${(1 - vis).toFixed(2)}\n` +
-        `|pos| ${(maxC / 1e9).toFixed(2)}e9 m · f32 ULP ${ulp32.toFixed(3)} m (render is camera-relative f64)`;
+        `|pos| ${(maxC / 1e9).toFixed(2)}e9 m · f32 ULP ${ulp32.toFixed(3)} m (render is camera-relative f64)` +
+        terrainLine;
     }
   });
 
