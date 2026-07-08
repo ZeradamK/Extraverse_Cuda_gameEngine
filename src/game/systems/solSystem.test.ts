@@ -57,6 +57,47 @@ describe('SolSystem rails', () => {
   });
 });
 
+describe('Earth–Moon system (scientific scale + libration)', () => {
+  it('distance is the real 384,400 km at system scale (38,440 km)', () => {
+    const s = new SolSystem(EPOCH);
+    const luna = s.bodies.find(b => b.name === 'Luna')!;
+    const earth = s.planets[2];
+    const d = Math.hypot(
+      luna.posM.x - earth.posM.x, luna.posM.y - earth.posM.y, luna.posM.z - earth.posM.z);
+    expect(d).toBeCloseTo(384_400e3 * SYSTEM_SCALE, -2);
+    // scale-invariant truths: distance = 60.34 Earth radii; Moon disc ≈ 0.518°
+    expect(d / earth.radiusM).toBeCloseTo(60.34, 1);
+    const angularDeg = (2 * Math.atan(luna.radiusM / d) * 180) / Math.PI;
+    expect(angularDeg).toBeGreaterThan(0.49);
+    expect(angularDeg).toBeLessThan(0.55);
+  });
+
+  it('libration: spin wobbles ±2e around tidal lock, latitude nods ±6.7°', () => {
+    const s = new SolSystem(EPOCH);
+    const luna = () => s.bodies.find(b => b.name === 'Luna')!;
+    let minDev = Infinity, maxDev = -Infinity, minWob = Infinity, maxWob = -Infinity;
+    for (let d = 0; d <= 28; d++) {
+      s.update(86400);
+      const b = luna();
+      const tS = (EPOCH + (d + 1) * 86400e3) / 1000;
+      const orbitAngle = ((tS / 86400 / 27.3217) % 1) * 2 * Math.PI;
+      const dev = b.spin - orbitAngle; // deviation from pure tidal lock
+      minDev = Math.min(minDev, dev); maxDev = Math.max(maxDev, dev);
+      minWob = Math.min(minWob, b.wobble); maxWob = Math.max(maxWob, b.wobble);
+    }
+    expect(maxDev).toBeGreaterThan(0.09);   // ≈ +0.11 rad (2e)
+    expect(minDev).toBeLessThan(-0.09);
+    expect(maxWob).toBeGreaterThan(0.10);   // ≈ ±0.1166 rad (6.68°)
+    expect(minWob).toBeLessThan(-0.10);
+  });
+
+  it('planets have zero wobble (libration is a tidally-locked-moon effect)', () => {
+    const s = new SolSystem(EPOCH);
+    s.update(86400);
+    for (const p of s.planets) expect(p.wobble).toBe(0);
+  });
+});
+
 describe('SolSystem.sunVisibility (eclipses)', () => {
   const sys = new SolSystem(EPOCH);
   const earth = sys.planets[2];

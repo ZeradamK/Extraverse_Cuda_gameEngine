@@ -18,6 +18,8 @@ export interface BodyState {
   radiusM: number;
   /** current spin angle, rad */
   spin: number;
+  /** latitude libration nod, rad (tidally locked moons — the 'wobble') */
+  wobble: number;
   axialTiltRad: number;
 }
 
@@ -35,7 +37,7 @@ export class SolSystem {
       def: SUN_DEF, name: 'Sol', kind: 'star', parent: null,
       posM: { x: 0, y: 0, z: 0 }, deltaM: { x: 0, y: 0, z: 0 },
       radiusM: SUN_DEF.radiusKm * 1000 * SYSTEM_SCALE,
-      spin: 0, axialTiltRad: 0,
+      spin: 0, wobble: 0, axialTiltRad: 0,
     };
     this.bodies.push(this.sun);
     for (const p of PLANETS) {
@@ -43,7 +45,7 @@ export class SolSystem {
         def: p, name: p.name, kind: 'planet', parent: this.sun,
         posM: { x: 0, y: 0, z: 0 }, deltaM: { x: 0, y: 0, z: 0 },
         radiusM: p.radiusKm * 1000 * SYSTEM_SCALE,
-        spin: 0, axialTiltRad: (p.axialTiltDeg * Math.PI) / 180,
+        spin: 0, wobble: 0, axialTiltRad: (p.axialTiltDeg * Math.PI) / 180,
       };
       this.bodies.push(ps);
       this.planets.push(ps);
@@ -52,7 +54,7 @@ export class SolSystem {
           def: m, name: m.name, kind: 'moon', parent: ps,
           posM: { x: 0, y: 0, z: 0 }, deltaM: { x: 0, y: 0, z: 0 },
           radiusM: m.radiusKm * 1000 * SYSTEM_SCALE,
-          spin: 0, axialTiltRad: 0,
+          spin: 0, wobble: 0, axialTiltRad: 0,
         });
       }
     }
@@ -84,7 +86,11 @@ export class SolSystem {
         b.posM.x = b.parent!.posM.x + this.tmp.x;
         b.posM.y = b.parent!.posM.y + this.tmp.y;
         b.posM.z = b.parent!.posM.z + this.tmp.z;
-        b.spin = ((tS / 86400 / def.periodDays) % 1) * 2 * Math.PI; // tidally locked
+        const orbitAngle = ((tS / 86400 / def.periodDays) % 1) * 2 * Math.PI;
+        // tidal lock + optical libration: uniform rotation vs non-uniform orbit
+        // gives a ±2e longitude wobble; axial tilt to the orbit gives a latitude nod
+        b.spin = orbitAngle + (def.librLonRad ?? 0) * Math.sin(orbitAngle);
+        b.wobble = (def.librLatRad ?? 0) * Math.sin(orbitAngle + Math.PI / 3);
       }
       b.deltaM.x = b.posM.x - px;
       b.deltaM.y = b.posM.y - py;
