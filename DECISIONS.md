@@ -77,3 +77,11 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - **Ocean**: datum-radius specular sphere (roughness 0.12) inside the terrain group; collision/landing surface = max(terrain, datum) on ocean worlds — you belly-land on water, not the seafloor. FFT waves remain a later tier.
 - **Clouds**: real 2k cloud map on a translucent DoubleSide sphere at R+6 km with slow drift (tier-1 of §8.4); volumetric raymarch still future.
 - Money shot verified: sunrise over Earth from 224 km — blue Rayleigh limb ring + sunrise band, real clouds over the Pacific, 120 fps, 0 console errors. Note: verify-m6's "low pass" leg times out by design (autoland descends at 55 m/s from 215 km ≈ 65 min) — informational, not a failure; manual dives are the way down from orbit.
+
+## Moon, photoreal Earth, NAV cruise (2026-07-07)
+
+- **User Spline assets**: both new glTFs (moon_rotation_wobble, photoreal_earth) export geometry-only (no materials/animations — known Spline limitation). The VALUE was inside `photoreal_earth.spline`: extracted 3× 4096×2048 embedded JPEGs by binary magic-scan (day albedo, night lights, clouds) — now Earth's textures (2× our old resolution). Extraction script pattern kept in git history.
+- **Moon**: 8k albedo (Solar System Scope) draped on the Luna terrain + proxy. The gltf's "rotation wobble" intent implemented SCIENTIFICALLY as optical libration: spin = orbit + 2e·sin(M) (±6.3° longitude), latitude nod ±6.68° — real values, unit-tested, applied to proxy rotation + terrain frame.
+- **Earth–Moon distance** was already scientifically exact (384,400 km × 0.1 scale): now asserted in tests including the scale-invariant truths — 60.34 Earth radii separation, 0.518° lunar disc.
+- **NAV cruise (C)**: coupled ceiling lifts 250 m/s → 4000 mi/s (6,437 km/s ≈ 2.1% c) with damper fiction (30 km/s² assist) and a distance-slaved safety cap (dSurface/4) so cruising at a planet auto-brakes instead of lithobraking. Spooldown: dampers stay hot above 1 km/s after NAV exit — braking from cruise on RCS would take a day (test-caught). Moons are warp/NAV targets now (cycle includes them).
+- E2E: NAV 552 km/s from LEO PASS; warp to Luna arrival at 346 km PASS; obstruction refusal + retry pattern validated in-script. 96 unit tests.
