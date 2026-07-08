@@ -9,7 +9,7 @@ import {
   atan, asin, color, float, normalWorld, positionLocal, positionWorld,
   smoothstep, texture, triplanarTexture, uniform, vec2,
 } from 'three/tsl';
-import type { BodyState } from '../systems/solSystem';
+import { bodyOrientation, type BodyState } from '../systems/solSystem';
 import type { Vec3d } from '../../engine/math/kepler';
 import type { PatchRequest, PatchResult } from '../../engine/workers/terrainWorker';
 import { createHeightField, type HeightField, type PlanetKind } from './heightfield';
@@ -52,10 +52,13 @@ export class PlanetTerrain {
   private lastResolveCam = new THREE.Vector3(1e12, 0, 0);
   private invSpin = new THREE.Quaternion();
 
-  /** scene-space planet center + sun dir + spin, fed to the shader per frame */
+  /** scene-space planet center + sun dir + inverse body orientation (drape) */
   private uCenter = uniform(new THREE.Vector3());
   private uSunDir = uniform(new THREE.Vector3(0, 1, 0));
-  private uSpin = uniform(0.0);
+  private uInvOrient = uniform(new THREE.Matrix3());
+  private scratchQ = new THREE.Quaternion();
+  private scratchQ2 = new THREE.Quaternion();
+  private scratchM4 = new THREE.Matrix4();
   private ocean: THREE.Mesh | null = null;
 
   constructor(
@@ -95,11 +98,12 @@ export class PlanetTerrain {
       const day = loader.load(opts.realDayTexture);
       day.colorSpace = THREE.SRGBColorSpace;
       day.wrapS = THREE.RepeatWrapping;
-      const dir = positionWorld.sub(this.uCenter).normalize();
+      // full inverse body orientation (tilt+spin+wobble) → body-fixed direction
+      const dir = this.uInvOrient.mul(positionWorld.sub(this.uCenter).normalize()).normalize();
       const lon = atan(dir.z, dir.x.negate());
       const lat = asin(dir.y.clamp(-1, 1));
       const uvE = vec2(
-        lon.sub(this.uSpin).div(2 * Math.PI).add(0.5).fract(),
+        lon.div(2 * Math.PI).add(0.5).fract(),
         float(0.5).sub(lat.div(Math.PI)),
       );
       const albedo = texture(day, uvE);
@@ -136,11 +140,17 @@ export class PlanetTerrain {
   setShaderFrame(centerScene: THREE.Vector3, sunDir: THREE.Vector3): void {
     (this.uCenter.value as THREE.Vector3).copy(centerScene);
     (this.uSunDir.value as THREE.Vector3).copy(sunDir);
-    this.uSpin.value = this.body.spin;
+    bodyOrientation(this.body, this.scratchQ, this.scratchQ2);
+    this.scratchM4.makeRotationFromQuaternion(this.scratchQ).invert();
+    (this.uInvOrient.value as THREE.Matrix3).setFromMatrix4(this.scratchM4);
   }
 
-  /** height above datum at a world-frame unit direction (spin-corrected) — collision */
+  /** height above datum at a world-frame unit direction (full orientation) — collision */
   surfaceRadiusAt(dirWorld: THREE.Vector3): number {
+    // audit fix: rebuild the inverse orientation from CURRENT body state so
+    // collision never uses a stale frame (was only refreshed while active)
+    bodyOrientation(this.body, this.scratchQ, this.scratchQ2);
+    this.invSpin.copy(this.scratchQ).invert();
     const d = this.camLocal.copy(dirWorld).applyQuaternion(this.invSpin).normalize();
     const h = this.heightField.height(d);
     // ocean worlds: you land on (or splash into) the water surface, not the seafloor
@@ -159,11 +169,9 @@ export class PlanetTerrain {
     this.group.visible = this.active;
     if (!this.active) return null;
 
-    // spin + libration wobble: terrain rotates with the body
-    const spinQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), b.spin);
-    if (b.wobble !== 0) {
-      spinQ.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), b.wobble));
-    }
+    // unified body orientation (tilt + spin + wobble) — matches the proxy exactly
+    const spinQ = new THREE.Quaternion();
+    bodyOrientation(b, spinQ, this.scratchQ2);
     this.invSpin.copy(spinQ).invert();
     this.group.quaternion.copy(spinQ);
     this.group.position.set(dx * -1, dy * -1, dz * -1); // planet center, camera-relative

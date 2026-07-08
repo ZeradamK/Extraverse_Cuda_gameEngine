@@ -8,7 +8,7 @@ import type { ActionId, IntentFrame } from '../../engine/core/input';
 const DT = 1 / 60;
 
 const emptyIntent = (): IntentFrame => ({
-  tick: 0, axes: {}, pressed: new Set<ActionId>(), held: new Set<ActionId>(), codes: new Set<string>(),
+  tick: 0, axes: {}, pressed: new Set<ActionId>(), held: new Set<ActionId>(), codes: new Set<string>(), lookDX: 0, lookDY: 0,
 });
 
 /** minimal stub system: sun at origin + one target planet ahead on −Z */
