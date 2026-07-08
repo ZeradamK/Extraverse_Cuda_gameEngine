@@ -17,6 +17,9 @@ import { SolSystem, bodyOrientation } from './game/systems/solSystem';
 import { WarpDrive } from './game/systems/warpDrive';
 import { Autoland } from './game/systems/autoland';
 import { FootMode, initRapier } from './game/systems/footMode';
+import { generateSystem, loadStars, type ProcSystem, type Star } from './game/systems/galaxy';
+import { GalaxyMap } from './ui/galaxyMap';
+import { AudioEngine } from './engine/core/audio';
 import {
   density, dragAccel, dynamicPressure, gravityAccel, spaceAltitude, surfaceVelocity, suttonGraves,
   PLASMA_FULL_W_M2, PLASMA_START_W_M2,
@@ -79,48 +82,76 @@ async function init(): Promise<void> {
   scene.environment = hdr; // reflections only (real galaxy skybox lands M8)
   scene.environmentIntensity = 0.35;
 
-  // --- the system on rails ---
-  const sys = new SolSystem(Date.now());
-  // user-authored Earth/Moon meshes (photoreal_earth.gltf, moon_rotation_wobble.gltf)
+  // --- the current star system (Sol at boot; swappable via hyperjump, M8) ---
+  const GALAXY_SEED = 20260706;
+  const solSys = new SolSystem(Date.now());
+  let sys: SolSystem | ProcSystem = solSys;
   bootStatus.textContent = 'Loading celestial meshes…';
   const celestial = await loadCelestialMeshes();
-  const shell = new FarShell(sys.bodies, new Map([
-    ['Earth', celestial.earth],
-    ['Luna', celestial.moon],
-  ]));
-  scene.add(shell.group);
-
-  // --- landable terrain (M4: Luna + Mars; M6: Earth with real continents) ---
-  bootStatus.textContent = 'Building Earth…';
-  const luna = sys.bodies.find(b => b.name === 'Luna')!;
-  const mars = sys.planets[3];
-  const earthBody = sys.planets[2];
   const earthMask = await loadEarthLandMask('/textures/planets/2k_earth_daymap.jpg');
-  const terrains = [
-    // Luna: real 8k albedo draped over the crater heightfield
-    new PlanetTerrain(luna, 'luna', 20260706, 0xffffff, {
-      realDayTexture: '/textures/planets/4k_moon.jpg', // 8k decoded = 134 MB GPU — crashed headless Chrome
-    }),
-    new PlanetTerrain(mars, 'mars', 19570104, 0xb4653f),
-    new PlanetTerrain(earthBody, 'earth', 19690720, 0xffffff, {
-      realDayTexture: '/textures/planets/2k_earth_daymap.jpg',
-      realNightTexture: '/textures/planets/2k_earth_nightmap.jpg',
-      ocean: true,
-      mask: earthMask,
-    }),
-  ];
-  for (const t of terrains) scene.add(t.group);
-  const clouds = new CloudLayer(earthBody, '/textures/planets/2k_earth_clouds.jpg');
-  scene.add(clouds.mesh);
+  bootStatus.textContent = 'Loading star catalog…';
+  const starCatalog = await loadStars();
+  starCatalog.unshift({ id: -1, name: 'Sol', x: 0, y: 0, z: 0, distLy: 0, mag: 4.83, ci: 0.65, color: 0xfff4ea });
+  let currentStar: Star = starCatalog[0];
 
-  // atmosphere shells (§8.3) for every body with an AtmoDef
-  const atmospheres = sys.planets
-    .filter(p => (p.def as PlanetDef).atmo)
-    .map(p => new AtmosphereShell(p, (p.def as PlanetDef).atmo!));
-  for (const a of atmospheres) scene.add(a.mesh);
+  let shell!: FarShell;
+  let terrains: PlanetTerrain[] = [];
+  let atmospheres: AtmosphereShell[] = [];
+  let clouds: CloudLayer | null = null;
+  let stars!: ReturnType<typeof createStarfield>;
+  const luna = solSys.bodies.find(b => b.name === 'Luna')!;
+  const mars = solSys.planets[3];
+  const earthBody = solSys.planets[2];
 
-  const stars = createStarfield();
-  scene.add(stars);
+  function buildSystemVisuals(): void {
+    shell?.dispose();
+    for (const t of terrains) t.dispose();
+    for (const a of atmospheres) a.mesh.removeFromParent();
+    clouds?.mesh.removeFromParent();
+    clouds = null;
+    stars?.removeFromParent();
+
+    if (sys === solSys) {
+      shell = new FarShell(sys.bodies, new Map([
+        ['Earth', celestial.earth],
+        ['Luna', celestial.moon],
+      ]));
+      terrains = [
+        new PlanetTerrain(luna, 'luna', 20260706, 0xffffff, {
+          realDayTexture: '/textures/planets/4k_moon.jpg',
+        }),
+        new PlanetTerrain(mars, 'mars', 19570104, 0xb4653f),
+        new PlanetTerrain(earthBody, 'earth', 19690720, 0xffffff, {
+          realDayTexture: '/textures/planets/2k_earth_daymap.jpg',
+          realNightTexture: '/textures/planets/2k_earth_nightmap.jpg',
+          ocean: true,
+          mask: earthMask,
+        }),
+      ];
+      clouds = new CloudLayer(earthBody, '/textures/planets/2k_earth_clouds.jpg');
+      scene.add(clouds.mesh);
+      stars = createStarfield(6000, 2e4, 12345, 0);
+    } else {
+      const ps = sys as ProcSystem;
+      shell = new FarShell(sys.bodies);
+      terrains = ps.planets
+        .filter(p => p.terrainKind)
+        .map(p => new PlanetTerrain(p, p.terrainKind!, p.terrainSeed!, p.tint ?? 0x888888));
+      // dense warm cluster sky at the galactic center (M10)
+      stars = ps.isBlackHole
+        ? createStarfield(24_000, 2e4, hash32(ps.seed), 0.6)
+        : createStarfield(6000, 2e4, hash32(ps.seed), 0.1);
+    }
+    atmospheres = sys.planets
+      .filter(p => (p.def as PlanetDef).atmo)
+      .map(p => new AtmosphereShell(p, (p.def as PlanetDef).atmo!));
+    for (const a of atmospheres) scene.add(a.mesh);
+    for (const t of terrains) scene.add(t.group);
+    scene.add(shell.group);
+    scene.add(stars);
+  }
+  const hash32 = (n: number) => (Math.imul(n ^ 0x9e3779b9, 2654435761) >>> 0);
+  buildSystemVisuals();
 
   // debug bisect: ?hide=exhaust,stars,shell,atmo,tunnel,dust,glow,gear,terrain
   const hidden = new Set((new URLSearchParams(location.search).get('hide') ?? '').split(','));
@@ -171,6 +202,99 @@ async function init(): Promise<void> {
   scene.add(tunnel.object);
   const hud = new Hud(document.body);
   const map = new SystemMap(document.body);
+  const audio = new AudioEngine();
+  const gmap = new GalaxyMap(document.body, starCatalog, () =>
+    ({ x: currentStar.x, y: currentStar.y, z: currentStar.z }));
+
+  // hyperjump (M8): charge 5 s → tunnel 12 s (the loading screen) → arrive
+  const hyper = { phase: 'idle' as 'idle' | 'charge' | 'tunnel', t: 0, target: null as Star | null };
+  let prevWarpState = 'IDLE';
+  let lastQDyn = 0;
+
+  function startHyperjump(target: Star): void {
+    if (hyper.phase !== 'idle' || target.id === currentStar.id) return;
+    hyper.phase = 'charge';
+    hyper.t = 0;
+    hyper.target = target;
+    landedPin = false;
+    autoland.cancel();
+    if (foot) boardShip();
+    audio.event('jump');
+  }
+
+  function completeJump(): void {
+    const star = hyper.target!;
+    currentStar = star;
+    sys = star.id === -1 ? solSys : generateSystem(star, GALAXY_SEED, Date.now());
+    warp.setSystem(sys);
+    warp.target = sys.planets[0] ?? null;
+    buildSystemVisuals();
+    // arrive 40 star-radii out, facing the star
+    const standoff = Math.max(sys.sun.radiusM * 40, 3e8);
+    flight.curr.pos.set(standoff * 0.7, standoff * 0.15, standoff * 0.7);
+    flight.curr.vel.set(0, 0, 0);
+    const m = new THREE.Matrix4().lookAt(flight.curr.pos, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0));
+    flight.curr.quat.setFromRotationMatrix(m);
+    flight.prev.pos.copy(flight.curr.pos);
+    flight.prev.quat.copy(flight.curr.quat);
+    flight.prev.vel.copy(flight.curr.vel);
+    saveGame();
+  }
+
+  function saveGame(): void {
+    try {
+      localStorage.setItem('xv-save', JSON.stringify({
+        v: 1,
+        starId: currentStar.id,
+        pos: [flight.curr.pos.x, flight.curr.pos.y, flight.curr.pos.z],
+        quat: [flight.curr.quat.x, flight.curr.quat.y, flight.curr.quat.z, flight.curr.quat.w],
+      }));
+    } catch { /* quota — non-fatal */ }
+  }
+
+  function loadGame(): boolean {
+    try {
+      const raw = localStorage.getItem('xv-save');
+      if (!raw) return false;
+      const s = JSON.parse(raw) as { v: number; starId: number; pos: number[]; quat: number[] };
+      if (s.v !== 1) return false;
+      const star = starCatalog.find(st => st.id === s.starId);
+      if (!star) return false;
+      if (star.id !== -1) {
+        currentStar = star;
+        sys = generateSystem(star, GALAXY_SEED, Date.now());
+        warp.setSystem(sys);
+        warp.target = sys.planets[0] ?? null;
+        buildSystemVisuals();
+      }
+      flight.curr.pos.set(s.pos[0], s.pos[1], s.pos[2]);
+      flight.curr.quat.set(s.quat[0], s.quat[1], s.quat[2], s.quat[3]);
+      flight.prev.pos.copy(flight.curr.pos);
+      flight.prev.quat.copy(flight.curr.quat);
+      return true;
+    } catch { return false; }
+  }
+  let saveTimer = 0;
+
+  // photo mode (F9): hide UI; P downloads a PNG
+  let photoMode = false;
+  function setPhotoMode(on: boolean): void {
+    photoMode = on;
+    hud.setHidden(on);
+    debugEl.style.display = on ? 'none' : '';
+  }
+  window.addEventListener('keydown', e => {
+    if (e.code === 'F9') setPhotoMode(!photoMode);
+    if (e.code === 'KeyP' && photoMode) {
+      renderer.domElement.toBlob(blob => {
+        if (!blob) return;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `extraverse-${Date.now()}.png`;
+        a.click();
+      });
+    }
+  });
 
   // spawn: LOW Earth orbit on the dayside — the planet LOOMS (fills half the
   // sky at 0.45R altitude), Star Citizen style. Scale reads instantly.
@@ -239,6 +363,7 @@ async function init(): Promise<void> {
     flight.prev.omega.copy(flight.curr.omega);
   }
 
+  if (loadGame()) bootStatus.textContent = 'Save restored…';
   renderer.domElement.addEventListener('click', () => void input.lock());
   window.addEventListener('resize', () => {
     rig.camera.aspect = window.innerWidth / window.innerHeight;
@@ -420,6 +545,13 @@ async function init(): Promise<void> {
       if (intent.pressed.has('ship.cycleTarget')) warp.cycleTarget();
       if (intent.pressed.has('ship.warpEngage')) warp.requestSpool();
       if (intent.codes.has('F2')) map.toggle();
+      if (intent.codes.has('KeyM')) { gmap.toggle(); audio.event('ui'); }
+      if (gmap.visible && intent.codes.has('BracketLeft')) { gmap.cycle(-1); audio.event('ui'); }
+      if (gmap.visible && intent.codes.has('BracketRight')) { gmap.cycle(1); audio.event('ui'); }
+      if (intent.codes.has('KeyJ') && gmap.visible && gmap.selected) {
+        startHyperjump(gmap.selected);
+        gmap.toggle();
+      }
       for (let d = 1; d <= 8; d++) {
         if (intent.codes.has(`Digit${d}`)) spawnAt(sys.planets[d - 1].posM, sys.planets[d - 1].radiusM * 6);
       }
@@ -429,7 +561,7 @@ async function init(): Promise<void> {
       if (intent.codes.has('Equal')) spawnEarthSunrise();
 
       // gear tap / autoland hold (N)
-      if (intent.pressed.has('ship.gearToggle')) gearRequested = !gearRequested;
+      if (intent.pressed.has('ship.gearToggle')) { gearRequested = !gearRequested; audio.event('gear'); }
       nHeldTicks = intent.held.has('ship.gearToggle') ? nHeldTicks + 1 : 0;
       if (nHeldTicks === 60) autoland.engage(); // 1 s hold
 
@@ -505,6 +637,7 @@ async function init(): Promise<void> {
         if (cmd.landedNow) {
           landedPin = true;
           rig.trauma = Math.max(rig.trauma, 0.3);
+          audio.event('thud');
           gear.update(DT, true, 1);
           // body-fixed anchor: the ship CO-ROTATES with the ground (audit fix)
           bodyOrientation(body, pinQuatBody, qScratch);
@@ -527,12 +660,13 @@ async function init(): Promise<void> {
         navCap = Math.max(250, dSurf / 4);
       }
       flight.step(DT, intent, {
-        steerScale: warp.steerScale,
-        skipTranslation: warpOwns,
+        steerScale: hyper.phase === 'idle' ? warp.steerScale : 0,
+        skipTranslation: warpOwns || hyper.phase !== 'idle',
         externalAccel: extAccel,
         suppressAssist: autoland.state === 'DESCEND' || autoland.state === 'FINAL',
         navCap,
       });
+      lastQDyn = qDyn;
       // LANDED: pin to the surface via the BODY-FIXED anchor — the ship rides
       // the ground through spin + rails (audit fix: was inertial-frame, ground
       // slid ~46 m/s under a 'landed' ship on Earth)
@@ -682,13 +816,14 @@ async function init(): Promise<void> {
       }
     }
 
-    // Earth cloud layer follows the same camera-relative convention
-    {
+    // Earth cloud layer (Sol only) follows the camera-relative convention
+    if (clouds && sys === solSys) {
       const b = earthBody;
       const dx = b.posM.x - camPosM.x, dy = b.posM.y - camPosM.y, dz = b.posM.z - camPosM.z;
       clouds.update(dtReal, tmp.set(dx, dy, dz).add(rig.camera.position), Math.hypot(dx, dy, dz));
       // audit fix: proxy clouds + near layer doubled between 2.2R and 30R
-      clouds.mesh.visible = clouds.mesh.visible && terrains[2].active;
+      const earthTerrain = terrains.find(t => t.body === earthBody);
+      clouds.mesh.visible = clouds.mesh.visible && !!earthTerrain?.active;
     }
 
     // far shell + stars around the camera
@@ -747,6 +882,35 @@ async function init(): Promise<void> {
     }
     if (flight.boosting) rig.trauma = Math.max(rig.trauma, 0.35);
 
+    // --- hyperjump progression (M8): the tunnel IS the loading screen ---
+    let hyperFactor = 0;
+    if (hyper.phase !== 'idle') {
+      hyper.t += dtReal;
+      if (hyper.phase === 'charge') {
+        hyperFactor = Math.min(0.35, hyper.t / 5 * 0.35);
+        rig.trauma = Math.max(rig.trauma, hyper.t / 5 * 0.4);
+        if (hyper.t >= 5) { hyper.phase = 'tunnel'; hyper.t = 0; audio.event('warpEnter'); }
+      } else {
+        hyperFactor = 1;
+        if (hyper.t >= 6 && hyper.target) { completeJump(); hyper.target = null; }
+        if (hyper.t >= 12) { hyper.phase = 'idle'; audio.event('warpExit'); rig.trauma = Math.max(rig.trauma, 0.5); }
+      }
+      tunnel.object.position.copy(rig.camera.position);
+      tunnel.update(dtReal, hyperFactor, renderQuat);
+      postfx.warpCA.value = Math.max(postfx.warpCA.value, 0.65 * hyperFactor * hyperFactor);
+    }
+
+    // audio + autosave
+    audio.update(flight.visualThrottle, lastQDyn, Math.max(warp.factor, hyperFactor));
+    if (warp.state !== prevWarpState) {
+      if (warp.state === 'SPOOL') audio.event('warpEnter');
+      if (warp.state === 'COOLDOWN') audio.event('warpExit');
+      prevWarpState = warp.state;
+    }
+    saveTimer += dtReal;
+    if (saveTimer > 10 && hyper.phase === 'idle') { saveTimer = 0; saveGame(); }
+    gmap.draw();
+
     // re-assert debug hides (systems flip visibility per frame)
     if (hidden.size > 1) {
       if (hidden.has('stars')) stars.visible = false;
@@ -802,6 +966,8 @@ async function init(): Promise<void> {
     // E2E test hook: sim state snapshot (read by scripts/verify-*.mjs)
     (window as unknown as { __XV: object }).__XV = {
       mode: foot ? 'foot' : 'ship',
+      system: currentStar.name,
+      planetCount: sys.planets.length,
       footSpeed: foot?.speed ?? 0,
       target: warp.target?.name ?? null,
       autoland: autoland.state,
