@@ -64,14 +64,17 @@ export function jplPosition(el: JplElements, T: number, out: Vec3d): Vec3d {
   return out;
 }
 
-/** circular-orbit helper for moons: a (m), period (s), phase (rad), inclination (rad) around parent */
+/**
+ * circular-orbit helper for moons: a (m), period (s), phase (rad), inclination
+ * (rad) around parent. Proper rotation about the node (X) axis — |out| = a exactly.
+ */
 export function circularOrbit(a: number, periodS: number, phase0: number, incl: number, tS: number, out: Vec3d): Vec3d {
   const th = phase0 + (2 * Math.PI * tS) / periodS;
   const x = a * Math.cos(th);
-  const z = -a * Math.sin(th);
+  const inPlane = -a * Math.sin(th);
   out.x = x;
-  out.y = Math.sin(incl) * z * 0.5; // gentle tilt (visual)
-  out.z = Math.cos(incl) * z;
+  out.y = -inPlane * Math.sin(incl);
+  out.z = inPlane * Math.cos(incl);
   return out;
 }
 
