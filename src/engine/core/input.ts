@@ -16,6 +16,8 @@ export interface IntentFrame {
   axes: Partial<Record<ActionId, number>>;
   pressed: Set<ActionId>;
   held: Set<ActionId>;
+  /** raw KeyboardEvent.codes pressed this tick (dev shortcuts, map toggle) */
+  codes: Set<string>;
 }
 
 interface KeyAxisBinding { neg?: string; pos?: string }
@@ -123,9 +125,10 @@ export class InputSystem {
       if (this.pressedCodes.has(code)) pressed.add(action);
       if (this.keys.has(code)) held.add(action);
     }
+    const codes = new Set(this.pressedCodes);
     this.pressedCodes.clear();
 
-    return { tick, axes, pressed, held };
+    return { tick, axes, pressed, held, codes };
   }
 
   get hasMouseInput(): boolean {
