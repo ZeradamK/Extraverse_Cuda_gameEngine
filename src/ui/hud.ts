@@ -38,6 +38,7 @@ export class Hud {
     cockpit: boolean; locked: boolean;
     targetName?: string; targetDistM?: number; warpState?: string; warpEtaS?: number;
     altAGL?: number | null; vRadial?: number; gearDown?: boolean; autoland?: string; heat01?: number;
+    inAtmosphere?: boolean; obstructed?: boolean;
   }): void {
     const { ctx } = this;
     const w = window.innerWidth, h = window.innerHeight;
@@ -120,6 +121,10 @@ export class Hud {
       ctx.fillStyle = AMBER;
       ctx.fillText(`AUTOLAND ${o.autoland}`, cx + 90, cy + 76);
     }
+    if (o.inAtmosphere) {
+      ctx.fillStyle = CYAN;
+      ctx.fillText('ATMOSPHERE', cx + 90, cy + 40);
+    }
     // heat bar
     ctx.strokeStyle = CYAN_DIM;
     ctx.strokeRect(cx + 90, cy + 32, 80, 6);
@@ -139,6 +144,9 @@ export class Hud {
         const eta = o.warpEtaS && isFinite(o.warpEtaS) && o.warpState === 'WARP'
           ? `  ·  ETA ${o.warpEtaS.toFixed(0)} s` : '';
         ctx.fillText(`DRIVE ${o.warpState}${eta}`, cx, h - 90);
+      } else if (o.obstructed) {
+        ctx.fillStyle = AMBER;
+        ctx.fillText('WARP OBSTRUCTED — clear line of sight required', cx, h - 90);
       } else {
         ctx.fillStyle = CYAN_DIM;
         ctx.fillText('[B] engage warp  ·  [G] next target', cx, h - 90);
