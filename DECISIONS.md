@@ -94,3 +94,21 @@ Deltas and discoveries vs `EXTRAVERSE_BUILD_PROMPT.md`, newest first.
 - **8k moon texture crashed headless Chrome** (134 MB decoded in the GPU process): proxy uses 2k, terrain drape 4k. Rule of thumb: keep per-texture decode ≤ ~50 MB.
 - **Headless Chrome WebGPU is flaky** (GPU process death after ~40 s under load even post-diet); headed Playwright is rock stable (60 fps vsync). E2E policy: logic asserts headless where possible, screenshots/long soak via `headless: false`.
 - NAV HUD shows honest damper G (3000+ G at full NAV accel) — fiction says inertial dampers; revisit display clamp in M9 polish.
+
+## Audit round (2026-07-07) — 3-agent audit (physics refs / QA strategy / reference frames)
+
+**Physics verified correct** vs literature: semi-implicit Euler order (Gaffer), quaternion small-angle integration (err O((ωdt)³)), drag, Sutton-Graves 1.7415e-4 (NASA NTRS cross-check), μ×0.01 scaling algebra, NASA atmosphere params, Kepler/JPL algorithm, controller stability margins (dt/τ ≪ 2), trauma model (Eiserloh GDC), terminal-velocity test math.
+
+**Confirmed defects — ALL FIXED:**
+- Far-shell Euler-order pole precession + terrain missing axial tilt (23.44° proxy↔terrain snap) → ONE `bodyOrientation()` (tilt·spin·wobble) shared by proxy, terrain group, collision, drape shader (mat3 inverse-orientation uniform replaced the lon-shift), foot/pin anchors. Regression test: pole fixed at 23.44°, no precession.
+- Sun key light sat on the ANTI-solar side (sign flip); fill swapped too.
+- Landed ships didn't co-rotate with the ground (46 m/s slide on Earth): pin anchor is now body-fixed (ship rides spin+rails; hull co-rotates); unpinning inherits ground velocity; autoland lands relative to SURFACE velocity (shared pure `surfaceVelocity()` = Ω×r about the tilted axis, unit-tested at 46.4 m/s Earth-equator).
+- Venus/Uranus retrograde double-encoded (negative hours × tilt>90) → spin uses |hours|, tilt carries retro (IAU).
+- Lunar libration sign flipped → spin = orbit − 2e·sin (matches ν−M).
+- landedPin not released on warp spool (surface-skimming warp) → interlock.
+- Earth clouds doubled between 2.2R–30R (proxy layer + near layer) → near layer only when terrain active.
+- atmo topM < spaceAltitude inconsistency → topM raised (Earth 100 km, Mars 90, Venus 250).
+- Diagonal coupled input exceeded the speed cap by √3 → setpoint magnitude clamp.
+- rng "golden pin" was a tautology → real hardcoded literals.
+
+**Deferred (documented):** carrier-handoff hysteresis, camera-vs-ship altitude readout, gForce omits external accel, planetTerrain streaming unit tests, soak/replay/perf-gate tests (backlog list from the QA audit).

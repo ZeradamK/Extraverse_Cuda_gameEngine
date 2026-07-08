@@ -64,13 +64,13 @@ export const PLANETS: PlanetDef[] = [
     texture: '/textures/planets/2k_mercury.jpg', elements: el['Mercury'], moons: [] },
   { name: 'Venus', radiusKm: 6051.8, gmKm3S2: 324_859, rotationHours: -5832.5, axialTiltDeg: 177.36,
     texture: '/textures/planets/2k_venus_atmosphere.jpg', elements: el['Venus'], moons: [],
-    atmo: { rho0: 65.0, H: 15_900, betaR: [3.0e-5, 2.2e-5, 1.0e-5], betaMSca: 2.0e-4, betaMExt: 4.0e-4, HM: 5000, g: 0.75, topM: 120_000 } },
+    atmo: { rho0: 65.0, H: 15_900, betaR: [3.0e-5, 2.2e-5, 1.0e-5], betaMSca: 2.0e-4, betaMExt: 4.0e-4, HM: 5000, g: 0.75, topM: 250_000 } },
   { name: 'Earth', radiusKm: 6371.0, gmKm3S2: 398_600.435, rotationHours: 23.9345, axialTiltDeg: 23.44,
     texture: '/textures/planets/earth_day_4k.jpg',
     emissiveNight: '/textures/planets/earth_night_4k.jpg',
     clouds: '/textures/planets/earth_clouds_4k.jpg',
     elements: el['EM Bary'],
-    atmo: { rho0: 1.225, H: 8500, betaR: [5.8e-6, 13.5e-6, 33.1e-6], betaMSca: 4.0e-6, betaMExt: 4.44e-6, HM: 1200, g: 0.8, topM: 70_000 },
+    atmo: { rho0: 1.225, H: 8500, betaR: [5.8e-6, 13.5e-6, 33.1e-6], betaMSca: 4.0e-6, betaMExt: 4.44e-6, HM: 1200, g: 0.8, topM: 100_000 },
     moons: [
       { name: 'Luna', radiusKm: 1737.4, gmKm3S2: 4902.8, aKm: 384_400, periodDays: 27.3217, phase0: 1.2, inclDeg: 5.145,
         color: 0xbdbdbd, texture: '/textures/planets/2k_moon.jpg',
@@ -80,7 +80,7 @@ export const PLANETS: PlanetDef[] = [
   { name: 'Mars', radiusKm: 3389.5, gmKm3S2: 42_828.4, rotationHours: 24.6229, axialTiltDeg: 25.19,
     texture: '/textures/planets/2k_mars.jpg', elements: el['Mars'], moons: [],
     // REVERSED Rayleigh spectrum (OpenSpace/Bruneton data): butterscotch days, BLUE sunsets
-    atmo: { rho0: 0.020, H: 11_100, betaR: [1.99e-5, 1.36e-5, 5.8e-6], betaMSca: 5.36e-5, betaMExt: 2.25e-4, HM: 3100, g: 0.85, topM: 85_000 } },
+    atmo: { rho0: 0.020, H: 11_100, betaR: [1.99e-5, 1.36e-5, 5.8e-6], betaMSca: 5.36e-5, betaMExt: 2.25e-4, HM: 3100, g: 0.85, topM: 90_000 } },
   { name: 'Jupiter', radiusKm: 69_911, gmKm3S2: 1.26686534e8, rotationHours: 9.925, axialTiltDeg: 3.13,
     texture: '/textures/planets/2k_jupiter.jpg', elements: el['Jupiter'],
     moons: [

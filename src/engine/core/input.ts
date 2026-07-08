@@ -9,6 +9,7 @@ export type ActionId =
   | 'ship.strafeX' | 'ship.strafeY' | 'ship.strafeZ'
   | 'ship.boost' | 'ship.allStop' | 'ship.flightAssistToggle' | 'ship.decoupleToggle'
   | 'ship.warpEngage' | 'ship.cycleTarget' | 'ship.gearToggle' | 'ship.navToggle'
+  | 'ship.exitSeat' | 'foot.interact'
   | 'camera.toggleChase' | 'ui.pause';
 
 export interface IntentFrame {
@@ -19,6 +20,9 @@ export interface IntentFrame {
   held: Set<ActionId>;
   /** raw KeyboardEvent.codes pressed this tick (dev shortcuts, map toggle) */
   codes: Set<string>;
+  /** raw mouse deltas this tick (FPS look — the ship reticle uses its own path) */
+  lookDX: number;
+  lookDY: number;
 }
 
 interface KeyAxisBinding { neg?: string; pos?: string }
@@ -40,6 +44,8 @@ const KEY_ACTIONS: Record<string, ActionId> = {
   KeyG: 'ship.cycleTarget',
   KeyN: 'ship.gearToggle',
   KeyC: 'ship.navToggle',
+  KeyY: 'ship.exitSeat',
+  KeyF: 'foot.interact',
   F4: 'camera.toggleChase',
   Escape: 'ui.pause',
 };
@@ -97,6 +103,8 @@ export class InputSystem {
 
   /** called once per fixed tick — drains mouse, snapshots keys */
   sample(tick: number, dt: number, recenterReticle: boolean): IntentFrame {
+    const lookDX = this.mouseDX;
+    const lookDY = this.mouseDY;
     // virtual joystick: mouse deltas move the reticle inside a clamped circle
     this.reticleX += this.mouseDX;
     this.reticleY += this.mouseDY;
@@ -133,7 +141,7 @@ export class InputSystem {
     const codes = new Set(this.pressedCodes);
     this.pressedCodes.clear();
 
-    return { tick, axes, pressed, held, codes };
+    return { tick, axes, pressed, held, codes, lookDX, lookDY };
   }
 
   get hasMouseInput(): boolean {
