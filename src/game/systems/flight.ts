@@ -57,7 +57,17 @@ export class ShipFlight {
   private tmpV = new THREE.Vector3();
   private tmpV2 = new THREE.Vector3();
 
-  step(dt: number, intent: IntentFrame, opts?: { steerScale?: number; skipTranslation?: boolean }): void {
+  step(
+    dt: number,
+    intent: IntentFrame,
+    opts?: {
+      steerScale?: number;
+      skipTranslation?: boolean;
+      externalAccel?: THREE.Vector3;
+      /** autoland owns translation: coupled velocity loop off (it would fight the descent law) */
+      suppressAssist?: boolean;
+    },
+  ): void {
     const steerScale = opts?.steerScale ?? 1;
     const c = this.curr;
     this.prev.pos.copy(c.pos);
@@ -110,7 +120,7 @@ export class ShipFlight {
     const allStop = intent.held.has('ship.allStop');
 
     this.aCmdBody.set(0, 0, 0);
-    if (this.flightAssist && !this.decoupled) {
+    if (this.flightAssist && !this.decoupled && !opts?.suppressAssist) {
       // coupled: stick = target velocity (body frame)
       const vt = this.tmpV.set(sx, sy, sz).multiplyScalar(V_MAX_COUPLED * (sz < 0 ? boost : 1));
       if (allStop) vt.set(0, 0, 0);
@@ -135,6 +145,7 @@ export class ShipFlight {
 
     // semi-implicit Euler: v first, then p (world frame)
     const aWorld = this.tmpV.copy(this.aCmdBody).applyQuaternion(c.quat);
+    if (opts?.externalAccel) aWorld.add(opts.externalAccel); // gravity + drag + autoland (§9.3)
     c.vel.addScaledVector(aWorld, dt);
     c.pos.addScaledVector(c.vel, dt);
 
