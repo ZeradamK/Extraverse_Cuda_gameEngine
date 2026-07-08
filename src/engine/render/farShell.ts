@@ -24,6 +24,7 @@ export class FarShell {
     this.group.renderOrder = -1;
     for (const b of bodies) {
       const g = b.kind === 'star' ? this.buildSun(b) : this.buildBody(b);
+      if (b.kind !== 'star') g.add(this.buildGlint(b)); // sub-pixel planets read as star-like glints (Elite-style)
       // draw far shell without depth so near geometry always wins; among
       // proxies, renderOrder is set per-frame by distance
       g.traverse(o => {
@@ -44,6 +45,22 @@ export class FarShell {
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
     return t;
+  }
+
+  private glints = new Map<BodyState, THREE.Sprite>();
+
+  private buildGlint(b: BodyState): THREE.Sprite {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({
+      color: b.kind === 'moon' ? 0xd8dce2 : 0xfff3e0,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+    }));
+    s.renderOrder = -99;
+    this.glints.set(b, s);
+    return s;
   }
 
   private buildSun(b: BodyState): THREE.Group {
@@ -140,11 +157,20 @@ export class FarShell {
       const dy = b.posM.y - camPosM.y;
       const dz = b.posM.z - camPosM.z;
       const d = Math.hypot(dx, dy, dz);
+      // TRUE angular size — no floor. Perspective is sacred: the disc only
+      // grows by real geometry (2·atan(R/d)). Sub-pixel bodies get a glint.
       const s = (R_SHELL * b.radiusM) / d;
       const k = R_SHELL / d;
       g.position.set(dx * k, dy * k, dz * k);
-      // apparent size floor: keep distant planets ≥ ~1.5px-ish (0.35 m at shell)
-      g.scale.setScalar(Math.max(s, 0.35));
+      g.scale.setScalar(s);
+      const glint = this.glints.get(b);
+      if (glint) {
+        // fade the glint in as the true disc shrinks below ~2 px (θ ≈ 0.0011 rad at 1600px/60°)
+        const theta = (2 * b.radiusM) / d;
+        const glintFade = THREE.MathUtils.clamp((0.0016 - theta) / 0.0008, 0, 1);
+        (glint.material as THREE.SpriteMaterial).opacity = glintFade * 0.9;
+        glint.scale.setScalar((0.0012 * R_SHELL) / s); // constant on-screen size (undo parent scale)
+      }
       const sphere = g.children[0] as THREE.Mesh;
       sphere.rotation.z = b.axialTiltRad;
       sphere.rotation.y = b.spin;

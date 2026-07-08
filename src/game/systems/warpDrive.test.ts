@@ -105,6 +105,45 @@ describe('WarpDrive state machine', () => {
     expect(flight.speed).toBeLessThan(400);
   });
 
+  it('OBSTRUCTED: refuses to spool when a body blocks the path (SC behavior)', () => {
+    const { sys, target } = stubSystem(-1e10);
+    // blocker planet dead-center between ship and target
+    const blocker = {
+      name: 'Blocker', kind: 'planet', posM: { x: 0, y: 0, z: -5e9 }, radiusM: 6.4e5,
+    } as never;
+    (sys.bodies as unknown[]).push(blocker);
+    const flight = new ShipFlight();
+    const warp = new WarpDrive(sys, flight);
+    warp.target = target;
+    expect(warp.obstructed).toBe(true);
+    warp.requestSpool();
+    expect(warp.state).toBe('IDLE'); // refused
+    // offset blocker far off-axis → clear
+    (blocker as { posM: { x: number } }).posM.x = 1e9;
+    expect(warp.obstructed).toBe(false);
+    warp.requestSpool();
+    expect(warp.state).toBe('SPOOL');
+  });
+
+  it('mass-lock: entering a body exclusion zone mid-warp = emergency drop', () => {
+    const { sys, target } = stubSystem(-1e10);
+    const blocker = {
+      name: 'Blocker', kind: 'planet', posM: { x: 0, y: 0, z: -2e9 }, radiusM: 6.4e5,
+    } as never;
+    const flight = new ShipFlight();
+    const warp = new WarpDrive(sys, flight);
+    warp.target = target;
+    warp.requestSpool();
+    stepAll(warp, flight, 3.2);
+    expect(warp.state).toBe('WARP');
+    (sys.bodies as unknown[]).push(blocker); // body appears in the path (worst case)
+    // teleport the ship inside the exclusion zone
+    flight.curr.pos.set(0, 0, -2e9 + 6.4e5);
+    warp.step(1 / 60);
+    expect(warp.state).toBe('COOLDOWN'); // emergency drop, no fly-through
+    expect(flight.speed).toBeLessThan(400);
+  });
+
   it('manual drop from WARP goes to COOLDOWN', () => {
     const { sys } = stubSystem(-1e10);
     const flight = new ShipFlight();
