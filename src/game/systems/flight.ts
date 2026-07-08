@@ -135,6 +135,7 @@ export class ShipFlight {
         ? Math.min(NAV_V_MAX, opts?.navCap ?? NAV_V_MAX)
         : V_MAX_COUPLED * (sz < 0 ? boost : 1);
       const vt = this.tmpV.set(sx, sy, sz).multiplyScalar(vCap);
+      if (vt.lengthSq() > vCap * vCap) vt.setLength(vCap); // diagonal input must not exceed the cap (audit)
       if (allStop) vt.set(0, 0, 0);
       const vBody = this.tmpV2.copy(c.vel).applyQuaternion(this.tmpQ.copy(c.quat).invert());
       this.aCmdBody.subVectors(vt, vBody).divideScalar(this.navMode ? NAV_TAU : TAU_LIN);

@@ -14,7 +14,7 @@ function intent(o: {
     axes: o.axes ?? {},
     pressed: new Set(o.pressed ?? []),
     held: new Set(o.held ?? []),
-    codes: new Set(),
+    codes: new Set(), lookDX: 0, lookDY: 0,
   };
 }
 
