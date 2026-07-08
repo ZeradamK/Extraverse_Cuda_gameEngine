@@ -36,8 +36,11 @@ export class CameraRig {
     this.mode = this.mode === 'chase' ? 'cockpit' : 'chase';
   }
 
-  /** shipPos/shipQuat = interpolated render transform; called per render frame */
-  update(dt: number, shipPos: THREE.Vector3, shipQuat: THREE.Quaternion, boosting: boolean): void {
+  /**
+   * shipPos/shipQuat = interpolated render transform; called per render frame.
+   * fovKick: 0 = base, 1 = boost (+15°), 2 = warp (+30° → 90° cockpit-equivalent)
+   */
+  update(dt: number, shipPos: THREE.Vector3, shipQuat: THREE.Quaternion, fovKick: number): void {
     this.t += dt;
     const k = (lambda: number) => 1 - Math.exp(-lambda * dt);
 
@@ -55,8 +58,8 @@ export class CameraRig {
       this.quat.slerp(shipQuat, k(8));
     }
 
-    // FOV: base per mode + boost kick (in fast λ≈15, out slower)
-    this.boostBlend += ((boosting ? 1 : 0) - this.boostBlend) * k(boosting ? 15 : 6);
+    // FOV: base per mode + kick (in fast λ≈15, out slower)
+    this.boostBlend += (fovKick - this.boostBlend) * k(fovKick > this.boostBlend ? 15 : 6);
     const targetFov = FOV[this.mode] + BOOST_FOV_KICK * this.boostBlend;
     this.fovCurrent += (targetFov - this.fovCurrent) * k(10);
 
