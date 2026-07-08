@@ -2,7 +2,10 @@
  * System map v1 (§13): top-down log-radial orbit view on a 2D canvas overlay.
  * F2 toggles. Log-scaled radii keep Mercury..Neptune all readable.
  */
-import type { SolSystem } from '../game/systems/solSystem';
+import type { BodyState } from '../game/systems/solSystem';
+
+/** minimal system surface for the map (SolSystem or ProcSystem) */
+interface MapSystem { planets: BodyState[] }
 import type { Vec3d } from '../engine/math/kepler';
 
 export class SystemMap {
@@ -24,7 +27,7 @@ export class SystemMap {
     this.cv.style.display = this.visible ? 'block' : 'none';
   }
 
-  draw(sys: SolSystem, shipPosM: Vec3d): void {
+  draw(sys: MapSystem, shipPosM: Vec3d): void {
     if (!this.visible) return;
     const w = window.innerWidth, h = window.innerHeight;
     if (this.cv.width !== w * devicePixelRatio) {
