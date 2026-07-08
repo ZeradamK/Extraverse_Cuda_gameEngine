@@ -13,11 +13,12 @@ import { CameraRig } from './engine/render/cameraRig';
 import { FarShell } from './engine/render/farShell';
 import { InputSystem } from './engine/core/input';
 import { ShipFlight } from './game/systems/flight';
-import { SolSystem } from './game/systems/solSystem';
+import { SolSystem, bodyOrientation } from './game/systems/solSystem';
 import { WarpDrive } from './game/systems/warpDrive';
 import { Autoland } from './game/systems/autoland';
+import { FootMode, initRapier } from './game/systems/footMode';
 import {
-  density, dragAccel, dynamicPressure, gravityAccel, spaceAltitude, suttonGraves,
+  density, dragAccel, dynamicPressure, gravityAccel, spaceAltitude, surfaceVelocity, suttonGraves,
   PLASMA_FULL_W_M2, PLASMA_START_W_M2,
 } from './game/systems/environment';
 import { PlanetTerrain } from './game/terrain/planetTerrain';
@@ -27,7 +28,7 @@ import { CloudLayer } from './game/vfx/cloudLayer';
 import { LandingGear } from './game/vfx/landingGear';
 import { Dust } from './game/vfx/dust';
 import { ReentryGlow } from './game/vfx/reentryGlow';
-import type { PlanetDef } from './data/solarSystem';
+import type { MoonDef, PlanetDef } from './data/solarSystem';
 import { Exhaust } from './game/vfx/exhaust';
 import { SpaceDust } from './game/vfx/spaceDust';
 import { WarpTunnel } from './game/vfx/warpTunnel';
@@ -142,6 +143,7 @@ async function init(): Promise<void> {
   scene.add(fill, fill.target);
 
   bootStatus.textContent = 'Loading GRIDCORP drone…';
+  await initRapier(); // Rapier WASM (M7 on-foot)
   const ship = await loadShip();
   const shipRoot = new THREE.Group(); // pinned at render origin — world moves around it
   shipRoot.add(ship.object);
@@ -256,6 +258,91 @@ async function init(): Promise<void> {
   let landedPin = false;
   let lastDust = 0;
   let inAtmo = false;        // below the body's Kármán-analog line
+
+  // --- M7: on-foot state (tangent frame anchored to the landed body) ---
+  let foot: FootMode | null = null;
+  let footBody: typeof sys.bodies[number] | null = null;
+  let yHeldTicks = 0;
+  const footAnchorDirLocal = new THREE.Vector3(); // body-fixed (unspun) radial
+  const footEastLocal = new THREE.Vector3();
+  let footAnchorSurfR = 0;
+  const shipDirLocal = new THREE.Vector3();       // ship anchor, body-fixed
+  let shipSurfDist = 0;
+  const shipQuatAtExit = new THREE.Quaternion();
+  const qBodyAtExit = new THREE.Quaternion();
+  // scratch
+  const fUp = new THREE.Vector3();
+  const fEast = new THREE.Vector3();
+  const fNorth = new THREE.Vector3();
+  const fSpinQ = new THREE.Quaternion();
+  const fBasis = new THREE.Matrix4();
+  const fQuat = new THREE.Quaternion();
+  const fEye = new THREE.Vector3();
+
+  /** current world tangent frame from the stored body-fixed anchor */
+  function footFrame(): void {
+    const b = footBody!;
+    bodyOrientation(b, fSpinQ, qScratch);
+    fUp.copy(footAnchorDirLocal).applyQuaternion(fSpinQ).normalize();
+    fEast.copy(footEastLocal).applyQuaternion(fSpinQ).normalize();
+    fNorth.crossVectors(fUp, fEast).normalize();
+  }
+
+  function exitSeat(): void {
+    const body = nearestBody();
+    const terrain = body ? terrains.find(t => t.body === body) : undefined;
+    if (!body || !terrain || !landedPin) return;
+    footBody = body;
+    bodyOrientation(body, fSpinQ, qScratch);
+    qBodyAtExit.copy(fSpinQ);
+    // radial at the ship, body-fixed
+    fUp.set(
+      flight.curr.pos.x - body.posM.x,
+      flight.curr.pos.y - body.posM.y,
+      flight.curr.pos.z - body.posM.z).normalize();
+    footAnchorSurfR = terrain.surfaceRadiusAt(fUp);
+    footAnchorDirLocal.copy(fUp).applyQuaternion(fSpinQ.clone().invert());
+    shipDirLocal.copy(footAnchorDirLocal);
+    shipSurfDist = footAnchorSurfR + 7.0;
+    shipQuatAtExit.copy(flight.curr.quat);
+    // tangent basis (stable east from world up crossing radial)
+    const ref = Math.abs(fUp.y) < 0.95 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    fEast.crossVectors(ref, fUp).normalize();
+    footEastLocal.copy(fEast).applyQuaternion(fSpinQ.clone().invert());
+    fNorth.crossVectors(fUp, fEast).normalize();
+
+    // local heightfield sampler: exact sphere sampling in the tangent frame
+    const bodyC = body.posM;
+    const anchorW = new THREE.Vector3().copy(fUp).multiplyScalar(footAnchorSurfR)
+      .add(new THREE.Vector3(bodyC.x, bodyC.y, bodyC.z));
+    const sampleDir = new THREE.Vector3();
+    const heightAt = (x: number, z: number): number => {
+      sampleDir.copy(anchorW)
+        .addScaledVector(fEast, x)
+        .addScaledVector(fNorth, z)
+        .sub(new THREE.Vector3(bodyC.x, bodyC.y, bodyC.z))
+        .normalize();
+      return terrain.surfaceRadiusAt(sampleDir) - footAnchorSurfR;
+    };
+    foot = new FootMode(
+      gravityAccel((body.def as PlanetDef).gmKm3S2, footAnchorSurfR),
+      heightAt,
+      [ // ship hull + wing slabs in the tangent frame (ship CoM at +7 up)
+        { pos: [0, 7, 0], halfExtents: [7, 2.8, 6.5] },
+        { pos: [-12, 6.5, 0], halfExtents: [6.5, 0.5, 4.5] },
+        { pos: [12, 6.5, 0], halfExtents: [6.5, 0.5, 4.5] },
+      ],
+      [14, 3, 0], // spawn beside the starboard wing
+    );
+    foot.yaw = Math.PI / 2; // face the ship
+  }
+
+  function boardShip(): void {
+    foot?.dispose();
+    foot = null;
+    footBody = null;
+    rig.clearExplicit('chase');
+  }
   const renderPos = new THREE.Vector3();   // f64 world (JS numbers)
   const renderQuat = new THREE.Quaternion();
   const camPosM = new THREE.Vector3();
@@ -265,6 +352,23 @@ async function init(): Promise<void> {
   const radial = new THREE.Vector3();
   const extAccel = new THREE.Vector3();
   const vHoriz = new THREE.Vector3();
+
+  // landed-pin anchor (body-fixed — the ship CO-ROTATES with the ground; audit fix)
+  const pinDirLocal = new THREE.Vector3();
+  let pinDist = 0;
+  const pinQuatBody = new THREE.Quaternion();  // body orientation at pin time
+  const pinQuatShip = new THREE.Quaternion();  // ship orientation at pin time
+  const qBodyTmp = new THREE.Quaternion();
+  const qScratch = new THREE.Quaternion();
+
+  /** ground velocity at a world position near body b (shared pure math) */
+  function surfaceVelAt(b: typeof sys.bodies[number], pos: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
+    const def = b.def as PlanetDef | MoonDef;
+    const hours = 'rotationHours' in def ? Math.abs(def.rotationHours) : (def as MoonDef).periodDays * 24;
+    surfaceVelocity(b.axialTiltRad, hours,
+      pos.x - b.posM.x, pos.y - b.posM.y, pos.z - b.posM.z, out);
+    return out;
+  }
 
   /** nearest body + radial data for the physics tick (f64) */
   function nearestBody() {
@@ -290,6 +394,28 @@ async function init(): Promise<void> {
     while (acc >= DT) {
       const recenter = flight.flightAssist && !input.hasMouseInput;
       const intent = input.sample(tick++, DT, recenter);
+
+      // --- ON FOOT (M7): character tick replaces ship systems ---
+      if (foot) {
+        if (intent.pressed.has('foot.interact')) {
+          const p = foot.position;
+          if (Math.hypot(p.x, p.z) < 18) { boardShip(); acc -= DT; continue; }
+        }
+        foot.step(DT, {
+          moveX: intent.axes['ship.strafeX'] ?? 0,
+          moveZ: -(intent.axes['ship.strafeZ'] ?? 0),
+          sprint: intent.held.has('ship.boost'),
+          jump: intent.codes.has('Space'),
+          lookDX: intent.lookDX,
+          lookDY: intent.lookDY,
+        });
+        acc -= DT;
+        continue;
+      }
+      // Y-hold 1 s = exit seat (landed only)
+      yHeldTicks = intent.held.has('ship.exitSeat') ? yHeldTicks + 1 : 0;
+      if (yHeldTicks === 60) exitSeat();
+
       if (intent.pressed.has('camera.toggleChase')) rig.toggle();
       if (intent.pressed.has('ship.cycleTarget')) warp.cycleTarget();
       if (intent.pressed.has('ship.warpEngage')) warp.requestSpool();
@@ -357,8 +483,13 @@ async function init(): Promise<void> {
         const altAGL = terrain
           ? dCenter - terrain.surfaceRadiusAt(radial)
           : altDatum;
-        const vR = flight.curr.vel.dot(radial);
-        vHoriz.copy(flight.curr.vel).addScaledVector(radial, -vR);
+        // audit fix: land RELATIVE TO THE GROUND — subtract the surface velocity
+        // (Earth's ground moves ~46 m/s at scale; touching down at inertial 0
+        // would smear the ship across the terrain)
+        surfaceVelAt(body, flight.curr.pos, tmp2);
+        vHoriz.copy(flight.curr.vel).sub(tmp2);
+        const vR = vHoriz.dot(radial);
+        vHoriz.addScaledVector(radial, -vR);
         const cmd = autoland.step(DT, {
           altAGL: altAGL - 7.0, // gear plane sits ~7 m below CoM
           vRadial: vR,
@@ -375,6 +506,11 @@ async function init(): Promise<void> {
           landedPin = true;
           rig.trauma = Math.max(rig.trauma, 0.3);
           gear.update(DT, true, 1);
+          // body-fixed anchor: the ship CO-ROTATES with the ground (audit fix)
+          bodyOrientation(body, pinQuatBody, qScratch);
+          pinDirLocal.copy(radial).applyQuaternion(qBodyTmp.copy(pinQuatBody).invert());
+          pinDist = (terrain ? terrain.surfaceRadiusAt(radial) : dCenter) + 7.0;
+          pinQuatShip.copy(flight.curr.quat);
         }
         if (autoland.state === 'FINAL' || autoland.state === 'LANDED') gearRequested = true;
       }
@@ -397,23 +533,35 @@ async function init(): Promise<void> {
         suppressAssist: autoland.state === 'DESCEND' || autoland.state === 'FINAL',
         navCap,
       });
-      // LANDED: pin to the surface (rest on gear); thrust breaks the pin
+      // LANDED: pin to the surface via the BODY-FIXED anchor — the ship rides
+      // the ground through spin + rails (audit fix: was inertial-frame, ground
+      // slid ~46 m/s under a 'landed' ship on Earth)
       if (landedPin && body) {
         if (translating) {
           landedPin = false;
+          // unpinning inherits the GROUND velocity — liftoff starts co-moving
+          surfaceVelAt(body, flight.curr.pos, tmp2);
+          flight.curr.vel.copy(tmp2);
         } else {
-          flight.curr.vel.set(0, 0, 0);
-          const terrain = terrains.find(t => t.body === body);
-          if (terrain) {
-            const surf = terrain.surfaceRadiusAt(radial) + 7.0;
-            flight.curr.pos.set(
-              body.posM.x + radial.x * surf,
-              body.posM.y + radial.y * surf,
-              body.posM.z + radial.z * surf);
-          }
+          bodyOrientation(body, qBodyTmp, qScratch);
+          tmp2.copy(pinDirLocal).applyQuaternion(qBodyTmp);
+          flight.curr.pos.set(
+            body.posM.x + tmp2.x * pinDist,
+            body.posM.y + tmp2.y * pinDist,
+            body.posM.z + tmp2.z * pinDist);
+          // co-rotate the hull: q_now · q_pin⁻¹ · q_ship_at_pin
+          flight.curr.quat.copy(qBodyTmp)
+            .multiply(qScratch.copy(pinQuatBody).invert())
+            .multiply(pinQuatShip);
+          flight.prev.quat.copy(flight.curr.quat);
+          flight.curr.vel.set(0, 0, 0); // HUD shows ground-relative rest
         }
       }
       warpOwns = warp.step(DT);
+      if (warp.state === 'SPOOL' || warp.state === 'WARP') {
+        landedPin = false;            // audit: no surface-skimming warp while pinned
+        autoland.cancel();
+      }
 
       // terrain collision clamp: never let the ship penetrate the surface.
       // (skipped while warp owns translation — the drive's mass-lock handles bodies)
@@ -463,6 +611,22 @@ async function init(): Promise<void> {
       }
     }
 
+    // ON FOOT: the parked ship rides the body's frame (rails + spin), exactly
+    if (foot && footBody) {
+      const b = footBody;
+      bodyOrientation(b, fSpinQ, qScratch);
+      tmp2.copy(shipDirLocal).applyQuaternion(fSpinQ);
+      flight.curr.pos.set(
+        b.posM.x + tmp2.x * shipSurfDist,
+        b.posM.y + tmp2.y * shipSurfDist,
+        b.posM.z + tmp2.z * shipSurfDist);
+      flight.prev.pos.copy(flight.curr.pos);
+      fQuat.copy(fSpinQ).multiply(qScratch.copy(qBodyAtExit).invert());
+      flight.curr.quat.copy(fQuat.multiply(shipQuatAtExit));
+      flight.prev.quat.copy(flight.curr.quat);
+      flight.curr.vel.set(0, 0, 0);
+    }
+
     // interpolate sim state (f64 all the way)
     const alpha = acc / DT;
     renderPos.lerpVectors(flight.prev.pos, flight.curr.pos, alpha);
@@ -471,6 +635,23 @@ async function init(): Promise<void> {
     // camera-relative: ship stays at render origin; rig orbits origin
     shipRoot.position.set(0, 0, 0);
     shipRoot.quaternion.copy(renderQuat);
+    // ON FOOT: explicit FPS eye pose in the tangent frame
+    if (foot && footBody) {
+      footFrame();
+      const b = footBody;
+      const e = foot.eye;
+      fEye.set(b.posM.x, b.posM.y, b.posM.z)
+        .addScaledVector(fUp, footAnchorSurfR)
+        .addScaledVector(fEast, e.x)
+        .addScaledVector(fUp, e.y)
+        .addScaledVector(fNorth, e.z)
+        .sub(tmp.set(renderPos.x, renderPos.y, renderPos.z)); // scene = world − shipWorld
+      fBasis.makeBasis(fEast, fUp, fNorth);
+      fQuat.setFromRotationMatrix(fBasis);
+      fQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), foot.yaw));
+      fQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), foot.pitch));
+      rig.setExplicitPose(fEye, fQuat);
+    }
     const fovKick = warp.factor > 0.02 ? warp.factor * 2 : (flight.boosting ? 1 : 0);
     rig.update(dtReal, ZERO, renderQuat, fovKick);
     camPosM.copy(renderPos).add(rig.camera.position); // f64 add: world camera pos
@@ -506,6 +687,8 @@ async function init(): Promise<void> {
       const b = earthBody;
       const dx = b.posM.x - camPosM.x, dy = b.posM.y - camPosM.y, dz = b.posM.z - camPosM.z;
       clouds.update(dtReal, tmp.set(dx, dy, dz).add(rig.camera.position), Math.hypot(dx, dy, dz));
+      // audit fix: proxy clouds + near layer doubled between 2.2R and 30R
+      clouds.mesh.visible = clouds.mesh.visible && terrains[2].active;
     }
 
     // far shell + stars around the camera
@@ -520,9 +703,9 @@ async function init(): Promise<void> {
     const dAU = dSunM / (AU_M * SYSTEM_SCALE);
     const vis = sys.sunVisibility(renderPos);
     sun.intensity = (8.0 / (dAU * dAU)) * vis;
-    sun.position.copy(tmp.copy(sunDir).multiplyScalar(-800)); // light comes FROM the sun
+    sun.position.copy(tmp.copy(sunDir).multiplyScalar(800)); // audit fix: key light sits ON the sun side
     sun.target.position.set(0, 0, 0);
-    fill.position.copy(tmp.copy(sunDir).multiplyScalar(600));
+    fill.position.copy(tmp.copy(sunDir).multiplyScalar(-600)); // fill from the anti-sun side
     fill.target.position.set(0, 0, 0);
 
     // ship visuals
@@ -610,11 +793,16 @@ async function init(): Promise<void> {
       inAtmosphere: inAtmo,
       obstructed: warp.obstructed,
       navMode: flight.navMode,
+      onFoot: !!foot,
+      boardPrompt: !!foot && Math.hypot(foot.position.x, foot.position.z) < 18,
+      exitPrompt: landedPin && !foot,
     });
     map.draw(sys, renderPos);
 
     // E2E test hook: sim state snapshot (read by scripts/verify-*.mjs)
     (window as unknown as { __XV: object }).__XV = {
+      mode: foot ? 'foot' : 'ship',
+      footSpeed: foot?.speed ?? 0,
       target: warp.target?.name ?? null,
       autoland: autoland.state,
       gearDeploy: gear.deploy01,

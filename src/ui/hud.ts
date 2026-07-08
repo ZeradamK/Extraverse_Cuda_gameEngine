@@ -39,6 +39,7 @@ export class Hud {
     targetName?: string; targetDistM?: number; warpState?: string; warpEtaS?: number;
     altAGL?: number | null; vRadial?: number; gearDown?: boolean; autoland?: string; heat01?: number;
     inAtmosphere?: boolean; obstructed?: boolean; navMode?: boolean;
+    onFoot?: boolean; boardPrompt?: boolean; exitPrompt?: boolean;
   }): void {
     const { ctx } = this;
     const w = window.innerWidth, h = window.innerHeight;
@@ -158,6 +159,20 @@ export class Hud {
         ctx.fillStyle = CYAN_DIM;
         ctx.fillText('[B] engage warp  ·  [G] next target', cx, h - 90);
       }
+    }
+
+    if (o.onFoot) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = CYAN_DIM;
+      ctx.fillText('ON FOOT — WASD move · Shift sprint · Space jump', cx, h - 40);
+      if (o.boardPrompt) {
+        ctx.fillStyle = AMBER;
+        ctx.fillText('[F] BOARD SHIP', cx, h - 60);
+      }
+    } else if (o.exitPrompt) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = CYAN_DIM;
+      ctx.fillText('[hold Y] exit ship', cx, h - 40);
     }
 
     if (!o.locked) {
