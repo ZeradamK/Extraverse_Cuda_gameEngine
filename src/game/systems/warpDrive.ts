@@ -33,8 +33,9 @@ export class WarpDrive {
   constructor(private sys: SolSystem, private flight: ShipFlight) {}
 
   cycleTarget(): void {
-    const targets = this.sys.planets;
-    const i = this.target ? targets.indexOf(this.target as never) : -1;
+    // planets + major moons are warp/nav targets
+    const targets = this.sys.bodies.filter(b => b.kind !== 'star');
+    const i = this.target ? targets.indexOf(this.target) : -1;
     this.target = targets[(i + 1) % targets.length];
   }
 

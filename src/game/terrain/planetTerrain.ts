@@ -158,8 +158,11 @@ export class PlanetTerrain {
     this.group.visible = this.active;
     if (!this.active) return null;
 
-    // spin: terrain rotates with the body
+    // spin + libration wobble: terrain rotates with the body
     const spinQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), b.spin);
+    if (b.wobble !== 0) {
+      spinQ.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), b.wobble));
+    }
     this.invSpin.copy(spinQ).invert();
     this.group.quaternion.copy(spinQ);
     this.group.position.set(dx * -1, dy * -1, dz * -1); // planet center, camera-relative
