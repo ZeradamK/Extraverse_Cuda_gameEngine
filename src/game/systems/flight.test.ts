@@ -122,6 +122,39 @@ describe('ShipFlight — warp translation ownership', () => {
   });
 });
 
+describe('ShipFlight — NAV cruise mode (4000 mi/s)', () => {
+  const NAV_V_MAX = 4000 * 1609.344;
+
+  it('C toggles NAV; cruise blows past the 250 m/s SCM cap toward the ceiling', () => {
+    const f = new ShipFlight();
+    f.step(1 / 60, intent({ pressed: ['ship.navToggle'] }));
+    expect(f.navMode).toBe(true);
+    // open space: no navCap constraint
+    for (let k = 0; k < 60 * 40; k++) f.step(DT, intent({ axes: { 'ship.strafeZ': -1 } }));
+    expect(f.speed).toBeGreaterThan(1e6);          // way beyond SCM after 40 s
+    expect(f.speed).toBeLessThanOrEqual(NAV_V_MAX * 1.001);
+  });
+
+  it('respects the distance-slaved safety cap near a body', () => {
+    const f = new ShipFlight();
+    f.navMode = true;
+    for (let k = 0; k < 60 * 30; k++) {
+      f.step(DT, intent({ axes: { 'ship.strafeZ': -1 } }), { navCap: 50_000 });
+    }
+    expect(f.speed).toBeLessThanOrEqual(50_000 * 1.001);
+    expect(f.speed).toBeGreaterThan(45_000);
+  });
+
+  it('dropping out of NAV decelerates back to SCM speeds', () => {
+    const f = new ShipFlight();
+    f.navMode = true;
+    for (let k = 0; k < 60 * 20; k++) f.step(DT, intent({ axes: { 'ship.strafeZ': -1 } }));
+    f.navMode = false;
+    for (let k = 0; k < 60 * 60 * 3; k++) f.step(DT, intent({})); // SCM assist brakes (authority-limited)
+    expect(f.speed).toBeLessThan(300);
+  });
+});
+
 describe('ShipFlight — G meter', () => {
   it('full boost thrust reads ≈ 10 G', () => {
     const f = new ShipFlight();

@@ -18,6 +18,10 @@ const ANG_AUTH = { pitch: 2.5, yaw: 1.5, roll: 4.0 };
 const ANG_MAX = { pitch: THREE.MathUtils.degToRad(60), yaw: THREE.MathUtils.degToRad(45), roll: THREE.MathUtils.degToRad(143) };
 
 const V_MAX_COUPLED = 250; // m/s SCM-style speed cap (coupled)
+/** NAV cruise ceiling: 4000 miles/sec (§ user spec) — interplanetary hops without warp */
+export const NAV_V_MAX = 4000 * 1609.344; // 6,437,376 m/s ≈ 2.1% c
+const NAV_ACCEL = 30_000; // m/s² — inertial-damper fiction; 0→cruise in minutes, not hours
+const NAV_TAU = 5;        // s — cruise velocity convergence
 const BOOST_MULT = 2.0;
 const BOOST_MAX_S = 4.0; // heat-gated
 const TAU_LIN = 0.4;
@@ -48,6 +52,8 @@ export class ShipFlight {
   flightAssist = true;
   decoupled = false;
   boosting = false;
+  /** NAV cruise mode (C): coupled cap lifts to NAV_V_MAX, damped by opts.navCap */
+  navMode = false;
   boostHeat = 0; // 0..1, gates boost
   /** last commanded accel (body), for G-meter + engine visuals */
   readonly aCmdBody = new THREE.Vector3();
@@ -66,6 +72,8 @@ export class ShipFlight {
       externalAccel?: THREE.Vector3;
       /** autoland owns translation: coupled velocity loop off (it would fight the descent law) */
       suppressAssist?: boolean;
+      /** distance-slaved NAV ceiling from main (safety near bodies); m/s */
+      navCap?: number;
     },
   ): void {
     const steerScale = opts?.steerScale ?? 1;
@@ -78,6 +86,7 @@ export class ShipFlight {
     // --- mode toggles ---
     if (intent.pressed.has('ship.flightAssistToggle')) this.flightAssist = !this.flightAssist;
     if (intent.pressed.has('ship.decoupleToggle')) this.decoupled = !this.decoupled;
+    if (intent.pressed.has('ship.navToggle')) this.navMode = !this.navMode;
 
     // --- boost heat gate ---
     const wantBoost = intent.held.has('ship.boost');
@@ -121,11 +130,14 @@ export class ShipFlight {
 
     this.aCmdBody.set(0, 0, 0);
     if (this.flightAssist && !this.decoupled && !opts?.suppressAssist) {
-      // coupled: stick = target velocity (body frame)
-      const vt = this.tmpV.set(sx, sy, sz).multiplyScalar(V_MAX_COUPLED * (sz < 0 ? boost : 1));
+      // coupled: stick = target velocity (body frame); NAV lifts the ceiling
+      const vCap = this.navMode
+        ? Math.min(NAV_V_MAX, opts?.navCap ?? NAV_V_MAX)
+        : V_MAX_COUPLED * (sz < 0 ? boost : 1);
+      const vt = this.tmpV.set(sx, sy, sz).multiplyScalar(vCap);
       if (allStop) vt.set(0, 0, 0);
       const vBody = this.tmpV2.copy(c.vel).applyQuaternion(this.tmpQ.copy(c.quat).invert());
-      this.aCmdBody.subVectors(vt, vBody).divideScalar(TAU_LIN);
+      this.aCmdBody.subVectors(vt, vBody).divideScalar(this.navMode ? NAV_TAU : TAU_LIN);
     } else {
       // decoupled / FA-off: stick = direct thrust
       this.aCmdBody.set(
@@ -138,10 +150,17 @@ export class ShipFlight {
         this.aCmdBody.subVectors(this.tmpV.set(0, 0, 0), vBody).divideScalar(TAU_LIN);
       }
     }
-    // clamp to authority (asymmetric Z: main vs retro)
-    this.aCmdBody.x = THREE.MathUtils.clamp(this.aCmdBody.x, -AUTH.lateral, AUTH.lateral);
-    this.aCmdBody.y = THREE.MathUtils.clamp(this.aCmdBody.y, -AUTH.vertical, AUTH.vertical);
-    this.aCmdBody.z = THREE.MathUtils.clamp(this.aCmdBody.z, -AUTH.main * boost, AUTH.retro);
+    // clamp to authority (asymmetric Z: main vs retro; NAV = damper-assisted).
+    // Dampers also stay hot ABOVE SCM speeds after NAV exit (spooldown brake) —
+    // otherwise braking from cruise on 30 m/s² RCS takes a literal day.
+    const dampersHot = (this.navMode || c.vel.lengthSq() > 1000 * 1000) && this.flightAssist && !this.decoupled;
+    if (dampersHot) {
+      this.aCmdBody.clampScalar(-NAV_ACCEL, NAV_ACCEL);
+    } else {
+      this.aCmdBody.x = THREE.MathUtils.clamp(this.aCmdBody.x, -AUTH.lateral, AUTH.lateral);
+      this.aCmdBody.y = THREE.MathUtils.clamp(this.aCmdBody.y, -AUTH.vertical, AUTH.vertical);
+      this.aCmdBody.z = THREE.MathUtils.clamp(this.aCmdBody.z, -AUTH.main * boost, AUTH.retro);
+    }
 
     // semi-implicit Euler: v first, then p (world frame)
     const aWorld = this.tmpV.copy(this.aCmdBody).applyQuaternion(c.quat);
