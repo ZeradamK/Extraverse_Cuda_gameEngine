@@ -165,6 +165,45 @@ describe('ShipFlight — warp translation ownership', () => {
   });
 });
 
+describe('ShipFlight — adaptive coupled velocity (space is empty = fly fast)', () => {
+  it('plain W scales to the distance-slaved cap WITHOUT NAV mode', () => {
+    const f = new ShipFlight();
+    for (let k = 0; k < 60 * 20; k++) {
+      f.step(DT, intent({ axes: { 'ship.strafeZ': -1 } }), { navCap: 50_000 });
+    }
+    expect(f.navMode).toBe(false);
+    expect(f.speed).toBeGreaterThan(45_000);
+    expect(f.speed).toBeLessThanOrEqual(50_000 * 1.001);
+  });
+
+  it('near the ground the base 250 m/s cap still rules', () => {
+    const f = new ShipFlight();
+    for (let k = 0; k < 60 * 20; k++) {
+      f.step(DT, intent({ axes: { 'ship.strafeZ': -1 } }), { navCap: 250 });
+    }
+    expect(f.speed).toBeGreaterThan(240);
+    expect(f.speed).toBeLessThan(255);
+  });
+
+  it('deep space (no nearby body): W runs toward the 4000 mi/s ceiling', () => {
+    const f = new ShipFlight();
+    for (let k = 0; k < 60 * 60; k++) {
+      f.step(DT, intent({ axes: { 'ship.strafeZ': -1 } }), { navCap: Infinity });
+    }
+    expect(f.speed).toBeGreaterThan(1e6); // 30 km/s² dampers × 60 s
+  });
+
+  it('releasing W at adaptive speed damper-brakes back to rest', () => {
+    const f = new ShipFlight();
+    for (let k = 0; k < 60 * 10; k++) {
+      f.step(DT, intent({ axes: { 'ship.strafeZ': -1 } }), { navCap: 30_000 });
+    }
+    expect(f.speed).toBeGreaterThan(25_000);
+    for (let k = 0; k < 60 * 10; k++) f.step(DT, intent({}), { navCap: 30_000 });
+    expect(f.speed).toBeLessThan(100);
+  });
+});
+
 describe('ShipFlight — NAV cruise mode (4000 mi/s)', () => {
   const NAV_V_MAX = 4000 * 1609.344;
 

@@ -141,18 +141,32 @@ export class ShipFlight {
 
     this.aCmdBody.set(0, 0, 0);
     let overCap = false;
+    let capHot = false;
     if (this.flightAssist && !this.decoupled && !opts?.suppressAssist) {
-      // coupled: stick = target velocity (body frame); NAV lifts the ceiling;
-      // afterburner ramps the cap toward 5× while spooled
+      // ADAPTIVE VELOCITY (2026-07-08, playability): the coupled cap scales
+      // with how much empty space is around — max(base·afterburner, the
+      // distance-slaved navCap from main) up to NAV_V_MAX. Space is big:
+      // 250 m/s at 287 km altitude reads as "Earth is frozen"; dSurf/4
+      // (Elite's rule) makes W-flight actually traverse it, and the slaving
+      // auto-brakes on approach. Near the ground the base cap still rules.
+      const adaptive = Math.min(opts?.navCap ?? V_MAX_COUPLED, NAV_V_MAX);
       const vCap = this.navMode
         ? Math.min(NAV_V_MAX, opts?.navCap ?? NAV_V_MAX)
-        : V_MAX_COUPLED * (sz < 0 ? boost : 1);
+        : Math.max(V_MAX_COUPLED * (sz < 0 ? boost : 1), adaptive);
+      capHot = vCap > V_MAX_COUPLED * BOOST_MULT * 1.15; // high-cap regime → damper authority
       const vt = this.tmpV.set(sx, sy, sz).multiplyScalar(vCap);
       if (vt.lengthSq() > vCap * vCap) vt.setLength(vCap); // diagonal input must not exceed the cap (audit)
       if (braking) vt.set(0, 0, 0);
       const vBody = this.tmpV2.copy(c.vel).applyQuaternion(this.tmpQ.copy(c.quat).invert());
       overCap = !this.navMode && vBody.lengthSq() > (vCap + 5) * (vCap + 5);
-      this.aCmdBody.subVectors(vt, vBody).divideScalar(this.navMode ? NAV_TAU : TAU_LIN);
+      // softer convergence while the velocity ERROR is huge (0.4 s at SCM feels
+      // crisp; at tens of km/s it would command absurd G before the damper
+      // clamp), snapping back to crisp 0.4 s for the final approach
+      this.aCmdBody.subVectors(vt, vBody);
+      const errBig = this.aCmdBody.lengthSq() > (V_MAX_COUPLED * BOOST_MULT) ** 2;
+      // S-brake always converges crisply (τ 0.4 → saturates the damper clamp:
+      // full 30 km/s² constant decel, 48 km/s → rest in ~1.6 s)
+      this.aCmdBody.divideScalar(this.navMode ? NAV_TAU : errBig && !braking ? 2 : TAU_LIN);
     } else {
       // decoupled / FA-off: stick = direct thrust
       this.aCmdBody.set(
@@ -168,7 +182,7 @@ export class ShipFlight {
     // clamp to authority (asymmetric Z: main vs retro; NAV = damper-assisted).
     // Dampers also stay hot ABOVE post-afterburner speeds after NAV exit —
     // otherwise braking from cruise on 30 m/s² RCS takes a literal day.
-    const dampersHot = (this.navMode || c.vel.lengthSq() > (V_MAX_COUPLED * BOOST_MULT * 1.15) ** 2)
+    const dampersHot = (this.navMode || capHot || c.vel.lengthSq() > (V_MAX_COUPLED * BOOST_MULT * 1.15) ** 2)
       && this.flightAssist && !this.decoupled;
     if (dampersHot) {
       this.aCmdBody.clampScalar(-NAV_ACCEL, NAV_ACCEL);

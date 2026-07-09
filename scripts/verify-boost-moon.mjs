@@ -1,8 +1,8 @@
-// Observational verify: new control scheme + Moon visibility (2026-07-08).
-// 1. spawn frames Earth AND Luna; 2. W+Space afterburner → 5× speed + boost01;
-// 3. release Space (W held) → decel back to ~250; 4. S brake → ~0;
-// 5. B at spawn → warp to Luna engages (obstruction fix) and arrives;
-// 6. Luna close-up (texture drape). Screenshots to scripts/*.png.
+// Observational verify: adaptive velocity + controls v2 + Moon visibility.
+// 1. boot spawn frames Earth AND Luna, Luna pre-targeted; 2. warp Earth→Luna
+// from low orbit (obstruction fix); 3. plain W at Luna reaches adaptive
+// (distance-slaved) speeds ≫ the old 250 cap; 4. S damper-brakes to rest;
+// 5. W+Space afterburner spools boost01 → VFX; 6. Luna surface close-up.
 import { chromium } from 'playwright';
 
 const URL = process.env.URL ?? 'http://localhost:5173';
@@ -34,33 +34,10 @@ try {
   check('boot + Luna pre-targeted', s0.target === 'Luna', `target=${s0.target}`);
   await page.screenshot({ path: 'scripts/verify-spawn-earth-luna.png' });
 
-  // afterburner: W+Space → boost01 ~1, speed → ~1250
-  await page.keyboard.down('w');
-  await page.keyboard.down(' ');
-  await page.waitForTimeout(9000);
-  let s = await xv();
-  check('afterburner spooled (boost01 > 0.95)', (s.boost ?? 0) > 0.95, `boost=${(s.boost ?? 0).toFixed(2)}`);
-  check('afterburner speed ≈ 5× (>1100 m/s)', s.speed > 1100 && s.speed < 1300, `${s.speed.toFixed(0)} m/s`);
-  await page.screenshot({ path: 'scripts/verify-boost-vfx.png' });
-
-  // release Space, keep W → decel to the 250 cap
-  await page.keyboard.up(' ');
-  await page.waitForTimeout(8000);
-  s = await xv();
-  check('release → decel to SCM cap (240–260)', s.speed > 240 && s.speed < 260, `${s.speed.toFixed(0)} m/s`);
-
-  // S brake → near zero
-  await page.keyboard.up('w');
-  await page.keyboard.down('s');
-  await page.waitForTimeout(4000);
-  await page.keyboard.up('s');
-  s = await xv();
-  check('S brake → stop (<5 m/s)', s.speed < 5, `${s.speed.toFixed(1)} m/s`);
-
-  // warp to Luna from spawn orbit (old code: permanently OBSTRUCTED here)
+  // warp to Luna from low Earth orbit (old code: permanently OBSTRUCTED here)
   await page.keyboard.press('b');
   await page.waitForTimeout(4500); // 3 s spool + align
-  s = await xv();
+  let s = await xv();
   check('warp engaged from low orbit', s.warp === 'WARP', `state=${s.warp}`);
   // well climb-out at V_MIN (~12 s) + two exponential legs ≈ 70–90 s
   let arrived = false;
@@ -69,10 +46,37 @@ try {
     s = await xv();
     if (s.warp !== 'WARP' && s.target === 'Luna') { arrived = true; break; }
   }
-  s = await xv();
-  check('warp arrived at Luna', arrived, `warp=${s.warp} alt=${s.altAGL === null ? 'n/a' : (s.altAGL / 1e3).toFixed(0) + ' km'}`);
+  check('warp arrived at Luna', arrived, `warp=${s.warp}`);
   await page.waitForTimeout(3000);
   await page.screenshot({ path: 'scripts/verify-luna-arrival.png' });
+
+  // adaptive velocity: plain W (no NAV, no boost) must blow past the old 250 cap
+  await page.keyboard.down('w');
+  await page.waitForTimeout(5000);
+  s = await xv();
+  check('adaptive W speed ≫ 250 (>10 km/s)', s.speed > 10_000, `${(s.speed / 1000).toFixed(1)} km/s`);
+  await page.keyboard.up('w');
+
+  // S = damper-assisted brake back to rest
+  await page.keyboard.down('s');
+  await page.waitForTimeout(5000);
+  await page.keyboard.up('s');
+  s = await xv();
+  check('S brake → rest (<100 m/s)', s.speed < 100, `${s.speed.toFixed(1)} m/s`);
+
+  // afterburner: W+Space spools boost01 → VFX shell + speed rises again
+  await page.keyboard.down('w');
+  await page.keyboard.down(' ');
+  await page.waitForTimeout(4000);
+  s = await xv();
+  check('afterburner spooled (boost01 > 0.95)', (s.boost ?? 0) > 0.95, `boost=${(s.boost ?? 0).toFixed(2)}`);
+  check('afterburner speed (>5 km/s)', s.speed > 5_000, `${(s.speed / 1000).toFixed(1)} km/s`);
+  await page.screenshot({ path: 'scripts/verify-boost-vfx.png' });
+  await page.keyboard.up(' ');
+  await page.keyboard.up('w');
+  await page.keyboard.down('s');
+  await page.waitForTimeout(5000);
+  await page.keyboard.up('s');
 
   // close-up texture check: dev key 9 = Luna 1.06R (long wait: terrain streaming)
   await page.keyboard.press('9');

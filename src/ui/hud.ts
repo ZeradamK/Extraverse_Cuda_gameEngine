@@ -46,7 +46,7 @@ export class Hud {
     targetDir?: THREE.Vector3;
     altAGL?: number | null; vRadial?: number; gearDown?: boolean; autoland?: string; heat01?: number;
     inAtmosphere?: boolean; obstructed?: boolean; navMode?: boolean;
-    inArrivalZone?: boolean; navHint?: boolean;
+    inArrivalZone?: boolean;
     onFoot?: boolean; boardPrompt?: boolean; exitPrompt?: boolean;
   }): void {
     const { ctx } = this;
@@ -212,10 +212,6 @@ export class Hud {
       } else {
         ctx.fillStyle = CYAN_DIM;
         ctx.fillText('[B] engage warp  ·  [G] next target', cx, h - 90);
-      }
-      if (o.navHint) {
-        ctx.fillStyle = AMBER;
-        ctx.fillText('TARGET FAR — [C] NAV CRUISE  ·  [B] WARP', cx, h - 70);
       }
     }
 

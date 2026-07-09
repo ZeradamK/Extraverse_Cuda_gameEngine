@@ -699,7 +699,8 @@ async function init(): Promise<void> {
       heatFlux += (rawHeat - heatFlux) * Math.min(1, 4 * DT);
       if (qDyn > 5000) rig.trauma = Math.max(rig.trauma, Math.min(0.45, qDyn / 60_000));
 
-      // NAV safety ceiling: distance-slaved to the nearest surface (never cruise into a planet)
+      // adaptive/NAV ceiling: distance-slaved to the nearest surface (never
+      // cruise into a planet). Also the coupled W-cap since adaptive velocity.
       let navCap = Infinity;
       if (body) {
         const dSurf = Math.hypot(
@@ -707,6 +708,9 @@ async function init(): Promise<void> {
           body.posM.y - flight.curr.pos.y,
           body.posM.z - flight.curr.pos.z) - body.radiusM;
         navCap = Math.max(250, dSurf / 4);
+        // inside an atmosphere the assist holds 1.5 km/s — faster is re-entry,
+        // and re-entry is opt-in (decouple or NAV), not a W-key accident
+        if (inAtmo) navCap = Math.min(navCap, 1500);
       }
       flight.step(DT, intent, {
         steerScale: hyper.phase === 'idle' ? warp.steerScale : 0,
@@ -1018,9 +1022,6 @@ async function init(): Promise<void> {
       inAtmosphere: inAtmo,
       obstructed: warp.obstructed,
       inArrivalZone: warp.inArrivalZone,
-      navHint: !foot && !flight.navMode && warp.state === 'IDLE' && !!warp.target
-        && !warp.inArrivalZone
-        && warp.targetDistance() / Math.max(flight.speed, 1) > 600,
       navMode: flight.navMode,
       onFoot: !!foot,
       boardPrompt: !!foot && Math.hypot(foot.position.x, foot.position.z) < 18,

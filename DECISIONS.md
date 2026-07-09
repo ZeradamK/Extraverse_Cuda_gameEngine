@@ -149,3 +149,14 @@ Player-reported: "can't move directly towards the moon and the earth", "I'm not 
 **Terrain streaming stalled for stationary/slow cameras:** the resolve-skip compared camera motion to 0.4% of the distance to the planet CENTER (landed ⇒ ~700 m threshold ⇒ never re-resolved) and completed worker builds never triggered a pass (onPatch adds meshes hidden) — teleport + hover froze at exactly MAX_INFLIGHT=12 patches forever. Fixed: threshold scales with ALTITUDE (`max(alt,50)·0.02`), `patchesDirty` forces a pass whenever geometry lands. Proxy handover now waits for a `covered` latch (a resolve pass with nothing missing + queue empty) instead of hiding on `t.active` — no more star-pierced black silhouette while patches stream.
 
 **Debug bisect flags kept:** `?raw` (bypass post stack), `?noao`, `?noshadow` — alongside the existing `?hide=`/`?debugTerrain`.
+
+## Adaptive velocity (2026-07-08) — "earth is still even when I'm moving"
+
+Player-reported after controls v2: at 250 m/s against a 1,274 km planet from 287 km up, motion is real but IMPERCEPTIBLE (0.04% of the distance per second) — "space time is broken". The scale is correct (ship 20 m vs Earth 1/10-scale — a 60,000× ratio, like real LEO); the CAP was the problem.
+
+**Fix — the coupled W-cap now scales with available space** (Elite's rule, unified with NAV):
+- `vCap = max(V_MAX_COUPLED·afterburner, min(navCap, NAV_V_MAX))` where navCap = max(250, dSurf/4) from main — plain W flies at dSurf/4 toward anything, auto-braking as the surface approaches; deep space W = the 4,000 mi/s ceiling. C (NAV) is now mostly redundant but kept.
+- High-cap regime uses damper authority (30 km/s², `capHot`) with a softened τ=2 while the velocity error > 1,250 m/s (0.4 s would command absurd G), snapping back to crisp 0.4 s for the final approach. S-brake always uses τ 0.4 → saturates the damper: constant 30 km/s² decel, 48 km/s → rest in ~1.6 s.
+- **In-atmosphere clamp 1.5 km/s** (main): full-throttle descents don't cremate — re-entry heat is opt-in (decouple/NAV), not a W-key accident.
+- NAV HUD hint removed (W alone traverses now). Smoke's "thrust closes distance": 286→48 km in 10 s (was 286→284).
+- Tests: 4 new adaptive-velocity unit tests (130 total); E2E asserts plain-W 47.9 km/s at Luna, brake to rest, boost spool.
