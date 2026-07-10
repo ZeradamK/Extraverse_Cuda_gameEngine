@@ -14,6 +14,7 @@ import type { Vec3d } from '../../engine/math/kepler';
 import type { PatchRequest, PatchResult } from '../../engine/workers/terrainWorker';
 import { createHeightField, type HeightField, type PlanetKind } from './heightfield';
 import type { LandMask } from './landMask';
+import { loadDemGrid } from './demGrid';
 
 export interface TerrainOptions {
   /** drape a real equirect day texture; optional night-lights emissive with terminator blend */
@@ -21,8 +22,12 @@ export interface TerrainOptions {
   realNightTexture?: string;
   /** render an ocean sphere at datum radius (Earth) */
   ocean?: boolean;
-  /** land mask for the heightfield + workers (Earth continents) */
+  /** land mask for the heightfield + workers (Earth continents, procedural fallback) */
   mask?: LandMask;
+  /** real global DEM (S1): gzipped LE Int16 equirect, real meters (e.g. ETOPO bake) */
+  demUrl?: string;
+  demW?: number;
+  demH?: number;
 }
 
 const SPLIT_FACTOR = 2.2;
@@ -36,8 +41,10 @@ interface NodeKeyed { key: string; face: number; level: number; ix: number; iy: 
 
 export class PlanetTerrain {
   readonly group = new THREE.Group();
-  readonly heightField: HeightField;
+  heightField: HeightField; // swapped once the real DEM streams in
   active = false;
+  /** true while a demUrl is declared but not yet loaded — patch builds hold */
+  private demPending = false;
 
   private workers: Worker[] = [];
   private nextWorker = 0;
@@ -78,6 +85,23 @@ export class PlanetTerrain {
         w.postMessage({ type: 'mask', data: opts.mask.data.slice(), w: opts.mask.w, h: opts.mask.h });
       }
       this.workers.push(w);
+    }
+    if (opts.demUrl && opts.demW && opts.demH) {
+      this.demPending = true;
+      void loadDemGrid(opts.demUrl, opts.demW, opts.demH)
+        .then(dem => {
+          // swap the collision heightfield and arm every worker, THEN build
+          this.heightField = createHeightField(kind, seed, opts.mask, dem);
+          for (const w of this.workers) {
+            w.postMessage({ type: 'dem', data: dem.data.slice(), w: dem.w, h: dem.h });
+          }
+          this.demPending = false;
+          this.patchesDirty = true; // wake the resolver
+        })
+        .catch(err => {
+          console.error(`DEM load failed for ${body.name} — procedural fallback`, err);
+          this.demPending = false;
+        });
     }
     const loader = new THREE.TextureLoader();
     const diff = loader.load('/textures/terrain/rock_diff.jpg');
@@ -175,6 +199,9 @@ export class PlanetTerrain {
     this.active = dist < b.radiusM * 2.2;
     this.group.visible = this.active;
     if (!this.active) { this.covered = false; return null; }
+    // real-DEM still streaming in: hold patch builds (they'd bake the
+    // procedural fallback); the far-shell proxy stays up (covered = false)
+    if (this.demPending) return dist - b.radiusM;
 
     // unified body orientation (tilt + spin + wobble) — matches the proxy exactly
     const spinQ = new THREE.Quaternion();

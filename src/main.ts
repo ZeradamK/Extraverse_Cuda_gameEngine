@@ -123,13 +123,17 @@ async function init(): Promise<void> {
         }),
         new PlanetTerrain(mars, 'mars', 19570104, 0xb4653f),
         new PlanetTerrain(earthBody, 'earth', 19690720, 0xffffff, {
-          realDayTexture: '/textures/planets/2k_earth_daymap.jpg',
-          realNightTexture: '/textures/planets/2k_earth_nightmap.jpg',
+          realDayTexture: '/textures/planets/earth_day_8k.jpg',
+          realNightTexture: '/textures/planets/earth_night_8k.jpg',
           ocean: true,
           mask: earthMask,
+          // REAL Earth (S1): ETOPO 2022 bake — real meters, land + bathymetry
+          demUrl: '/data/earth_dem_8192x4096_i16.bin.gz',
+          demW: 8192,
+          demH: 4096,
         }),
       ];
-      clouds = new CloudLayer(earthBody, '/textures/planets/2k_earth_clouds.jpg');
+      clouds = new CloudLayer(earthBody, '/textures/planets/earth_clouds_8k.jpg');
       scene.add(clouds.mesh);
       stars = createStarfield(6000, 2e4, 12345, 0);
     } else {
@@ -386,6 +390,42 @@ async function init(): Promise<void> {
     flight.prev.vel.copy(flight.curr.vel);
   }
 
+  /** dev (H): mountain overflight at 45 km — real-ETOPO showcase. Picks the
+   *  best-LIT range among famous ones (epoch spin decides who has daylight). */
+  function spawnHimalaya(): void {
+    const b = earthBody;
+    const ranges: [string, number, number][] = [
+      ['Himalaya', 27.8, 86.9], ['Andes', -32.6, -70.0], ['Rockies', 39.1, -106.4],
+      ['Alps', 45.9, 7.9], ['East Africa', -3.1, 37.4], ['Karakoram', 35.9, 76.5],
+    ];
+    bodyOrientation(b, qBodyTmp, qScratch);
+    const sunDir = new THREE.Vector3(-b.posM.x, -b.posM.y, -b.posM.z).normalize();
+    let bestUp = new THREE.Vector3(), bestElev = -2, bestName = '';
+    for (const [name, latD, lonD] of ranges) {
+      const lat = (latD * Math.PI) / 180, lon = (lonD * Math.PI) / 180;
+      const up = new THREE.Vector3(
+        -Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon))
+        .applyQuaternion(qBodyTmp);
+      const elev = up.dot(sunDir);
+      if (elev > bestElev) { bestElev = elev; bestUp = up; bestName = name; }
+    }
+    console.info(`[dev] mountain overflight: ${bestName} (sun elev ${bestElev.toFixed(2)})`);
+    const up = bestUp;
+    const r = b.radiusM + 45_000;
+    flight.curr.pos.set(b.posM.x + up.x * r, b.posM.y + up.y * r, b.posM.z + up.z * r);
+    flight.curr.vel.set(0, 0, 0);
+    // nose toward the northern horizon, slightly down at the range
+    const north = new THREE.Vector3(0, 1, 0).applyQuaternion(qBodyTmp);
+    const target = new THREE.Vector3().copy(flight.curr.pos)
+      .addScaledVector(north, 300_000).addScaledVector(up, -40_000);
+    const m = new THREE.Matrix4().lookAt(flight.curr.pos, target, up);
+    flight.curr.quat.setFromRotationMatrix(m);
+    flight.curr.omega.set(0, 0, 0);
+    flight.prev.pos.copy(flight.curr.pos);
+    flight.prev.quat.copy(flight.curr.quat);
+    flight.prev.vel.copy(flight.curr.vel);
+  }
+
   /** Mars entry demo: 60 km up, ~2.4 km/s oblique dive — plasma within seconds */
   function spawnMarsEntry(): void {
     spawnAt(mars.posM, mars.radiusM + 60_000);
@@ -608,6 +648,7 @@ async function init(): Promise<void> {
       if (intent.codes.has('Digit0')) spawnMarsSunset();
       if (intent.codes.has('Minus')) spawnMarsEntry();
       if (intent.codes.has('Equal')) spawnEarthSunrise();
+      if (intent.codes.has('KeyH')) spawnHimalaya();
 
       // gear tap / autoland hold (N)
       if (intent.pressed.has('ship.gearToggle')) { gearRequested = !gearRequested; audio.event('gear'); }

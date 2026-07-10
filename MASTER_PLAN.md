@@ -30,7 +30,7 @@ Proven substrate (M0–M10 complete; 130 unit tests + 11-gate gameplay smoke + E
 
 ---
 
-## 2. Phase S0 — Foundation (weeks 1–6; everything compounds on these)
+## 2. Phase S0 — Foundation (first in dependency order; everything compounds on these)
 
 ### S0.0 CI that can actually enforce the doctrine
 - GitHub Actions: typecheck + vitest + all headless sim checks (no GPU needed) on hosted runners; the WebGPU smoke gate runs on a **self-hosted Mac runner** (this machine or a Mac mini).
@@ -63,22 +63,23 @@ WorldSpec {
 ### S0.3 AgentBridge — observations/actions as a contract
 - Grow `__XV` + input injection into `observe()/act()`, identical in-browser and headless. Analytic sensors first (pose, velocity, altitude, target vector, ray-distance/depth probes); RGB camera observations are explicitly **later** (headless GPU render worker or browser-side capture — named R-phase work, not smuggled into sim-core).
 - The new AgentBridge smoke harness runs **in parallel with** the existing timing-based harness until it has a week of green soak; only then retire the old gates.
-- Acceptance: smoke passes via AgentBridge; a scripted "fly to Luna and land" agent completes headless (may slip to week 7–8 if S0.2 runs long — it gates the Day-90 demo, not S1).
+- Acceptance: smoke passes via AgentBridge; a scripted "fly to Luna and land" agent completes headless (gates Demo One, not S1).
 
 ### S0.4 Asset provenance (IP remediation — before anything commercial)
 - Replace the Spline-extracted Earth textures with NASA **Blue Marble / Black Marble** (public domain, equal/better resolution). Create `LICENSES.md` — one entry per asset/dataset (source, license, obligations). Render all CC attributions in a credits UI (HYG CC BY-SA, Solar System Scope CC BY). Note for later steps: ESA/Rosetta assets are CC BY-SA IGO (share-alike) — prefer procedural comet nuclei from published shape statistics; "GRAM-style" atmosphere variability means *our own implementation from published profiles*, never embedded Mars-GRAM/MCD output (license-restricted).
 
-*S0 budget: 4–6 weeks for 1–2 devs + AI agents (review-corrected from 2–3). S0.1/S0.2 interface agreement blocks everything; implementations overlap S1.*
+*No calendar — we move as fast as the gates go green. Only the dependency rule holds: S0.1/S0.2 interface agreement blocks everything downstream; implementations overlap S1 freely.*
 
 ---
 
 ## 3. Phase S1–S8 — the Base: research-grade Sol system, end to end
 
-Each step: scope → sources → RL hook → acceptance. Two classes: **[GATE]** steps gate the Month-6 acquisition demo; **[BREADTH]** steps are world-breadth that can proceed in parallel/after without blocking the RL spine.
+Each step: scope → sources → RL hook → acceptance. Two classes: **[GATE]** steps gate the acquisition demo; **[BREADTH]** steps are world-breadth that can proceed in parallel/after without blocking the RL spine.
 
 ### S1 [GATE, partial] Every solid surface in the Sol system (landable)
 - New terrain kinds: **Mercury** (cratered, lobate scarps), **Venus** (volcanic plains/tesserae — *terrain authored in S1 but surface access gated behind S3's crush/thermal fail-states; until then it's "visible from altitude"* — 92 bar/460 °C without survival mechanics would undermine the research-grade frame), **Io** (volcanic), **Europa** (ice ridges/chaos), **Ganymede/Callisto** (grooved/cratered ice), **Titan** (dunes + methane-lake mask), **Enceladus** (tiger stripes), **Triton** (add to Neptune), **Pluto/Charon** (add as a *barycentric binary* — small rail-model extension, elements from JPL Table 2b since Table 1 omits Pluto), **Ceres/Vesta** (with S5). **Phobos/Deimos**: high-detail proxies now; non-spherical terrain is explicitly a stretch goal. **`canyon` terrain kind** added for Mars (Valles-class) — the Drone Rescue flagship needs it.
-- **DEM v1 scoped tight:** 2 bodies × 2 landmark sites (e.g., Olympus Mons + Valles Marineris from **MOLA**; Tycho + Apollo 11 from **LOLA**) as pre-baked patch tiles in a bucket, streamed via `tileSource`. Full DEM pipelines are their own later project. `verticalScale: 1.0` for these (slope-true; that's what RL export uses) — the 0.1 globe uses proportional heights; `VALIDATION.md` documents which mode feeds which claim.
+- **✅ SHIPPED 2026-07-09 — Real Earth Tier A:** global ETOPO 2022 bake (8192×4096 Int16 real meters incl. bathymetry, 49.9 MB gz) drives the Earth heightfield + collision; NASA Blue/Black Marble + cloud textures replace the provenance-unknown set; real-asset regression tests (Himalaya/Mariana/Kansas). Real vertical meters on the 0.1 globe (correct atmosphere coupling; documented). **Tier B next:** runtime close-ups from AWS terrarium tiles (keyless, CORS `*`, verified) with `terrain.reearth.land` fallback; poles come from the baked base.
+- **DEM v1 for other bodies scoped tight:** 2 bodies × 2 landmark sites (e.g., Olympus Mons + Valles Marineris from **MOLA**; Tycho + Apollo 11 from **LOLA**) as pre-baked patch tiles, streamed via `tileSource`. `verticalScale: 1.0` for these (slope-true; that's what RL export uses); `VALIDATION.md` documents which mode feeds which claim.
 - Sources (review-corrected): MESSENGER/**MDIS stereo + MLA (northern hemisphere)** for Mercury; **Magellan altimetry (GTDR, ~10–30 km effective)** for Venus topography — landmark-accuracy impossible, procedural infill mandatory; Galileo/Voyager (Jovian moons); Cassini (**SAR covers ~half of Titan**); New Horizons (Pluto); MOLA/LOLA PDS. Solar System Scope textures are *artistic renditions* — visuals only, never cited as ground truth.
 - **RL hook:** every kind becomes a generator in the environment library (`canyon`, `crater_field`, `ice_ridges`, `dune_field`…) — moat #4's natural-terrain half.
 - Acceptance: dev-key tour of 12+ landable bodies; autoland + on-foot smoke on 3 new bodies; per-kind heightfield tests; cold-start download stays within budget (below).
@@ -116,37 +117,37 @@ Each step: scope → sources → RL hook → acceptance. Two classes: **[GATE]**
 ### S7 [BREADTH] Playability: warp, routes, autopilot, many galaxies
 - Route planner (multi-hop warp → hyperjump chains) on the maps; **autopilot** ("fly me to Titan" = align + warp + arrive + optional autoland, composed from existing systems); time-accel integration.
 - **Multi-galaxy tiers:** Tier 1 = current galaxy (HYG + procgen + Sgr A*). Tier 2 = LMC/SMC/M31 with **real galaxy positions, orientations, and structural parameters (disk/bulge/bar profiles); star contents procedural, optionally Gaia-seeded where resolved (LMC/SMC)** — no false "real star catalog" claim for M31.
-- **RL hook:** the autopilot is the first scripted baseline agent (exactly the `3D-RL-layer` Month-3 guidance: scripted before deep RL) — the reference policy all evaluations compare against.
+- **RL hook:** the autopilot is the first scripted baseline agent (exactly the `3D-RL-layer` guidance: scripted before deep RL) — the reference policy all evaluations compare against.
 - Acceptance: Earth → Titan → M31-procgen world with ≤ 3 player inputs; autopilot completes Earth→Luna hands-off.
 
 ### S8 [GATE] Embodiments + missions = tasks (where game and RL become one product)
 - **S8.0 Embodiments (blocker fix — the wedge needs a drone, not an 18 m fighter):** quadrotor dynamics (thrust/pitch/roll/yaw continuous actions) + wheeled-rover dynamics in sim-core; `AgentSpec.embodiment` first-class; analytic sensor channels (imu/position/ray-depth) now, RGB camera later (R-phase render worker). Simple drone + rover art assets (kit-bashed or generated; logged in LICENSES.md).
-- **S8a Entity/objective runtime:** entities, triggers, timers, objective state machine (reach/checkpoint first), mission HUD. This is a new subsystem comparable to a shipped milestone — budgeted as such, not smuggled into "schema week."
+- **S8a Entity/objective runtime:** entities, triggers, timers, objective state machine (reach/checkpoint first), mission HUD. This is a new subsystem comparable to a shipped milestone — budgeted as such, not smuggled into the schema task.
 - **S8b Task templates + flagship:** collect/deliver/scan/repair/return objectives, hazard hooks (dust storm affects flight), rescue/cargo/survey/race templates. Flagship: **"Mars Drone Rescue"** exactly as specced in `3D-RL-layer`, *flown by the quadrotor embodiment*, in the S1 canyon kind, authored in true meters for export. One spec, two renderers: playable mission AND RL environment.
 - **RL hook:** `MissionSpec/TaskSpec` + `RewardSpec` + `ResetSpec` = moat #5; missions playable from WorldSpec JSON alone.
 - Acceptance: 5 templates from JSON with no code; Drone Rescue completable by a human (drone), attempted by the scripted agent, auto-generating a playtest report (completion %, failure clusters, times).
 
-**Always-on budgets (added per review):** cold start ≤ 150 MB (per-body lazy texture/DEM loading); fps ≥ 50 smoke gate extended to 2 more bodies; supported surface through Month 6 = **desktop Chrome/Edge (Safari WebGPU where stable); mobile explicitly out of scope**.
+**Always-on budgets (added per review):** cold start ≤ 150 MB (per-body lazy texture/DEM loading); fps ≥ 50 smoke gate extended to 2 more bodies; supported surface through Demo One and the acquisition demo = **desktop Chrome/Edge (Safari WebGPU where stable); mobile explicitly out of scope**.
 
 ---
 
-## 4. Phase R — the RL layer (dated against the `3D-RL-layer` 6-month clock; runs IN PARALLEL with S3–S7, not after)
+## 4. Phase R — the RL layer (dependency-ordered, runs IN PARALLEL with S3–S7, not after)
 
-- **R1 (Month 3–4) Environment compiler + Python bridge:** WorldSpec → `simcore.make("mars_rescue_drone_v1")`; **Gymnasium shim ships WITH R1, not after** — Python ↔ Node bridge (subprocess IPC or WebSocket on the AgentBridge contract; an explicit design decision with a round-trip acceptance test), because PPO realistically means stable-baselines3, not a TS RL stack. Thin **platform infra** alongside: WorldSpec storage (Postgres), asset bucket, job runner for headless eval/training (the source plan's FastAPI/Redis stack, minimally).
-- **R2 (Month 4) Three flagship gyms:** Mars drone canyon (quadrotor); rover exploration (Ceres or Mars); **game-level playtest with the on-foot character — "is this level beatable?"** (the source's Environment 3; "no humanoids" applies to robot embodiments/export, not to having a game character). Beautiful AND functional — the demo reel.
-- **R3 (Month 4–5) Agent evaluation as a data product (moat #2, restored):** scripted/heuristic/LLM-planner agents run any WorldSpec and **persist structured traces — trajectories, failure events, collision points, reward curves, path heatmaps — keyed by WorldSpec id+version in queryable storage; the playtest report is generated FROM the trace store.** The data flywheel exists from the first artifact.
-- **R4 (Month 5–6) Training + export:** PPO baseline on the drone gym via the Python bridge (parallel headless workers). **Isaac Lab export v1 descoped honestly:** task/reward/randomization YAML + heightmap/terrain-parameter export; **full USD scene export is its own later milestone** (meshing quadtree terrain to USD with materials/collision is a mini-project). **After Isaac: Unity adapter next (acquisition-relevant), Unreal later** — moat #3 stays a roadmap, not a drop. RGB-camera observations land here (headless render worker) if a vision task demands them.
-- **R5 (Month 7–8) Prompt layer + the acquisition-grade demo:** the source's **five** agents — world-designer, **asset/layout**, task-designer, playtester, patch agent — emitting/patching WorldSpecs against a schema that S1–S8 content has battle-tested. Demo: describe → generate → agent fails → patch → agent succeeds → export to Isaac. *(Re-baselined from the source's Month 6 with the owner's sign-off implied by the Day-90 scope; Stage-5 marketplace deferred — revisit post-R5.)*
+- **R1 (unblocked by S0.2 + S8a) Environment compiler + Python bridge:** WorldSpec → `simcore.make("mars_rescue_drone_v1")`; **Gymnasium shim ships WITH R1, not after** — Python ↔ Node bridge (subprocess IPC or WebSocket on the AgentBridge contract; an explicit design decision with a round-trip acceptance test), because PPO realistically means stable-baselines3, not a TS RL stack. Thin **platform infra** alongside: WorldSpec storage (Postgres), asset bucket, job runner for headless eval/training (the source plan's FastAPI/Redis stack, minimally).
+- **R2 (after R1) Three flagship gyms:** Mars drone canyon (quadrotor); rover exploration (Ceres or Mars); **game-level playtest with the on-foot character — "is this level beatable?"** (the source's Environment 3; "no humanoids" applies to robot embodiments/export, not to having a game character). Beautiful AND functional — the demo reel.
+- **R3 (with R2) Agent evaluation as a data product (moat #2, restored):** scripted/heuristic/LLM-planner agents run any WorldSpec and **persist structured traces — trajectories, failure events, collision points, reward curves, path heatmaps — keyed by WorldSpec id+version in queryable storage; the playtest report is generated FROM the trace store.** The data flywheel exists from the first artifact.
+- **R4 (after R1) Training + export:** PPO baseline on the drone gym via the Python bridge (parallel headless workers). **Isaac Lab export v1 descoped honestly:** task/reward/randomization YAML + heightmap/terrain-parameter export; **full USD scene export is its own later milestone** (meshing quadtree terrain to USD with materials/collision is a mini-project). **After Isaac: Unity adapter next (acquisition-relevant), Unreal later** — moat #3 stays a roadmap, not a drop. RGB-camera observations land here (headless render worker) if a vision task demands them.
+- **R5 (last) Prompt layer + the acquisition-grade demo:** the source's **five** agents — world-designer, **asset/layout**, task-designer, playtester, patch agent — emitting/patching WorldSpecs against a schema that S1–S8 content has battle-tested. Demo: describe → generate → agent fails → patch → agent succeeds → export to Isaac. *(Stage-5 marketplace deferred — revisit post-R5.)*
 
 ---
 
-## 5. Sequencing — first 90 days and the demo gate map
+## 5. Sequencing — dependency order only (no calendar; we move as fast as gates go green)
 
-**Weeks 1–3:** S0.0 CI + S0.1 WorldSpec interfaces + Scale Decision. **Weeks 2–6:** S0.2 sim-core re-architecture (rails/carry on ticks; real-scale support). **Weeks 3–6:** S0.4 asset remediation; S1 partial (Mercury + Titan + Europa + `canyon` kind). **Weeks 5–9:** S8.0 quadrotor embodiment + S8a objective runtime. **Weeks 7–10:** S0.3 AgentBridge + parallel-soak harness; S2 partial (Titan atmo + layered AtmoDef + wind randomization). **Weeks 9–13:** S8b Drone Rescue + R1 minimal (`make()` + Python round-trip) + R3 minimal (scripted-agent report from the trace store).
+**Pipeline order:** ① S0.0 CI + S0.1 WorldSpec interfaces + Scale Decision → ② S0.2 sim-core re-architecture (rails/carry on ticks; real-scale support) ∥ S0.4 asset remediation ∥ S1 partial (real-Earth DEM, Mercury, Titan, Europa, `canyon` kind) → ③ S8.0 quadrotor embodiment + S8a objective runtime ∥ S0.3 AgentBridge (parallel-soak) ∥ S2 partial (Titan atmo + layered AtmoDef + wind randomization) → ④ S8b Drone Rescue + R1 minimal (`make()` + Python round-trip) + R3 minimal (scripted-agent report from the trace store). Breadth steps (S3–S7) interleave whenever they don't block the spine.
 
-**Day-90 demo (fallback-safe):** one link — play a **reach/race mission on a new S1 body** in the browser, then the same WorldSpec as `env.step()` rollouts with an agent playtest report. **Stretch version:** full Mars Drone Rescue with the quadrotor. (Review finding: the flagship needs S8.0+S8a+S8b+canyon; the fallback needs only S8a — the demo cannot slip on content.)
+**Demo One (fallback-safe, ships when ④ lands):** one link — play a **reach/race mission on a new S1 body** in the browser, then the same WorldSpec as `env.step()` rollouts with an agent playtest report. **Stretch version:** full Mars Drone Rescue with the quadrotor. (The flagship needs S8.0+S8a+S8b+canyon; the fallback needs only S8a — the demo cannot slip on content.)
 
-**Demo gate map:** S0 (all), S1-partial, S2-partial, S8 → gate the acquisition demo. S3, S4, S5, S7-Tier-2 → breadth, parallel, non-blocking. S6 → gates the *space-GNC vertical* specifically (and any "research-grade orbital" public claim), not the Month-4 demos.
+**Demo gate map:** S0 (all), S1-partial, S2-partial, S8 → gate the acquisition demo. S3, S4, S5, S7-Tier-2 → breadth, parallel, non-blocking. S6 → gates the *space-GNC vertical* specifically (and any "research-grade orbital" public claim), not the earlier demos.
 
 **Always-on rules:** world content lands as WorldSpec data + generators; every milestone adds unit tests + a smoke/E2E gate + (where physics) a `VALIDATION.md` entry with citation and scale; replay-hash determinism stays green (ship sim); epoch comes from the spec; playability regressions block release; LICENSES.md grows with every asset.
 

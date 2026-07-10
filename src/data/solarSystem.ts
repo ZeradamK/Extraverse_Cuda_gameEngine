@@ -65,10 +65,12 @@ export const PLANETS: PlanetDef[] = [
   { name: 'Venus', radiusKm: 6051.8, gmKm3S2: 324_859, rotationHours: -5832.5, axialTiltDeg: 177.36,
     texture: '/textures/planets/2k_venus_atmosphere.jpg', elements: el['Venus'], moons: [],
     atmo: { rho0: 65.0, H: 15_900, betaR: [3.0e-5, 2.2e-5, 1.0e-5], betaMSca: 2.0e-4, betaMExt: 4.0e-4, HM: 5000, g: 0.75, topM: 250_000 } },
+  // Earth media: NASA Blue Marble NG (day, unshaded 200412), Black Marble 2016
+  // (night), NASA cloud_combined (clouds) — public domain (S0.4 provenance fix)
   { name: 'Earth', radiusKm: 6371.0, gmKm3S2: 398_600.435, rotationHours: 23.9345, axialTiltDeg: 23.44,
-    texture: '/textures/planets/earth_day_4k.jpg',
-    emissiveNight: '/textures/planets/earth_night_4k.jpg',
-    clouds: '/textures/planets/earth_clouds_4k.jpg',
+    texture: '/textures/planets/earth_day_8k.jpg',
+    emissiveNight: '/textures/planets/earth_night_8k.jpg',
+    clouds: '/textures/planets/earth_clouds_8k.jpg',
     elements: el['EM Bary'],
     atmo: { rho0: 1.225, H: 8500, betaR: [5.8e-6, 13.5e-6, 33.1e-6], betaMSca: 4.0e-6, betaMExt: 4.44e-6, HM: 1200, g: 0.8, topM: 100_000 },
     moons: [

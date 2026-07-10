@@ -7,6 +7,7 @@
 import { createNoise3D, type NoiseFunction3D } from 'simplex-noise';
 import { hash, mulberry32 } from '../../engine/math/rng';
 import { landAtDir, type LandMask } from './landMask';
+import { demAtDir, type DemGrid } from './demGrid';
 
 export interface Vec3 { x: number; y: number; z: number }
 
@@ -92,13 +93,34 @@ function smoothMax(a: number, b: number, k: number): number {
   return -smoothMin(-a, -b, k);
 }
 
-export function createHeightField(kind: PlanetKind, seed: number, mask?: LandMask): HeightField {
+export function createHeightField(kind: PlanetKind, seed: number, mask?: LandMask, dem?: DemGrid): HeightField {
   const n1 = createNoise3D(mulberry32(hash(seed, 1)));
   const n2 = createNoise3D(mulberry32(hash(seed, 2)));
 
+  if (kind === 'earth' && dem) {
+    // REAL EARTH (S1): ETOPO-baked global DEM in real meters (land + bathymetry)
+    // + sub-pixel procedural detail so close-ups aren't bilinear pyramids.
+    // Real vertical on the 0.1-radius globe is deliberate: absolute altitudes
+    // couple correctly with the real-H atmosphere (Everest sits at true 8.8 km
+    // pressure altitude), at the cost of 10× relative slope drama.
+    const maxAmp = 9200; // Everest 8848 + detail headroom
+    return {
+      maxAmp,
+      height(dir: Vec3): number {
+        const base = demAtDir(dem, dir);
+        // detail fades in above the shoreline (land) and stays tiny on the
+        // seafloor — beaches keep their real elevation, peaks get texture
+        const landF = Math.max(0, Math.min(1, base / 120));
+        const detail = ridged(n2, dir.x * 90, dir.y * 90, dir.z * 90, 4) * 55 * landF
+          + fbm(n1, dir.x * 300, dir.y * 300, dir.z * 300, 3) * (8 + 22 * landF);
+        return base + detail;
+      },
+    };
+  }
+
   if (kind === 'earth') {
-    // real continents: land mask from the Blue Marble texture gates the relief.
-    // Land rises above datum (ocean surface = datum sphere); seafloor dips below.
+    // fallback (no DEM loaded): land mask from the Blue Marble texture gates
+    // procedural relief. Land rises above datum; seafloor dips below.
     const maxAmp = 1400;
     return {
       maxAmp,
