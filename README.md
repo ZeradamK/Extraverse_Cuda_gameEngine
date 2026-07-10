@@ -7,8 +7,10 @@
 ```bash
 npm install
 npm run dev        # http://localhost:5173  (Chrome with WebGPU)
-npm run check      # typecheck + 113 unit tests + 11-gate smoke test
+npm run check      # typecheck + unit tests + gating gameplay smoke test
 ```
+
+**You start ON EARTH** — parked on the pad at SpaceX Vandenberg SLC-4E, California, on real ETOPO 2022 terrain with the Pacific ahead. Lift off with `R`, pitch up, and fly to space; the Moon is pre-targeted. Dev teleports: `K` back to the pad, `O` low Earth orbit, `H` sun-lit mountain overflight, `1–9` planets.
 
 ## What's inside
 

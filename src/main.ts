@@ -85,7 +85,33 @@ async function init(): Promise<void> {
 
   // --- the current star system (Sol at boot; swappable via hyperjump, M8) ---
   const GALAXY_SEED = 20260706;
-  const solSys = new SolSystem(Date.now());
+  // Boot-epoch calibration: the game starts on the pad at SpaceX Vandenberg,
+  // and the spin phase was never calibrated to real GMST — so pick the epoch
+  // within the next 24 h whose spin puts MORNING sun (~33°) over California.
+  // Planets move imperceptibly in 24 h; the first impression is always lit.
+  const PAD_LAT = (34.632 * Math.PI) / 180, PAD_LON = (-120.611 * Math.PI) / 180;
+  const padDirBody = {
+    x: -Math.cos(PAD_LAT) * Math.cos(PAD_LON),
+    y: Math.sin(PAD_LAT),
+    z: Math.cos(PAD_LAT) * Math.sin(PAD_LON),
+  };
+  const qCal = new THREE.Quaternion(), qCalS = new THREE.Quaternion();
+  const vCal = new THREE.Vector3();
+  function sunElevAtPad(s: SolSystem): number {
+    const e = s.planets[2];
+    bodyOrientation(e, qCal, qCalS);
+    vCal.set(padDirBody.x, padDirBody.y, padDirBody.z).applyQuaternion(qCal);
+    const sl = Math.hypot(e.posM.x, e.posM.y, e.posM.z) || 1;
+    return vCal.x * (-e.posM.x / sl) + vCal.y * (-e.posM.y / sl) + vCal.z * (-e.posM.z / sl);
+  }
+  const bootMs = Date.now();
+  let solSys = new SolSystem(bootMs);
+  let bestScore = -Math.abs(sunElevAtPad(solSys) - 0.55);
+  for (let min = 20; min < 24 * 60; min += 20) {
+    const cand = new SolSystem(bootMs + min * 60_000);
+    const score = -Math.abs(sunElevAtPad(cand) - 0.55); // target sin(elev) ≈ 0.55
+    if (score > bestScore) { bestScore = score; solSys = cand; }
+  }
   let sys: SolSystem | ProcSystem = solSys;
   bootStatus.textContent = 'Loading celestial meshes…';
   const celestial = await loadCelestialMeshes();
@@ -312,10 +338,11 @@ async function init(): Promise<void> {
   // ship→Earth-center (Earth's disc half-angle here is 43.6°), and the nose
   // aims along the bisector: Earth fills the left of frame, Luna floats right.
   const earth = sys.planets[2];
-  spawnEarthWithLuna();
-  warp.target = luna; // pre-targeted: B warps straight to the Moon, G cycles
+  // (boot placement happens after the landed-pin state exists — see the
+  //  "boot placement" block before the render loop: SpaceX pad, California)
 
   function spawnEarthWithLuna(): void {
+    landedPin = false;
     const E = earth.posM;
     const u = new THREE.Vector3(luna.posM.x - E.x, luna.posM.y - E.y, luna.posM.z - E.z).normalize();
     const toSun = new THREE.Vector3(-E.x, -E.y, -E.z).normalize();
@@ -355,6 +382,7 @@ async function init(): Promise<void> {
 
   /** Mars terminator, 4 km AGL, nose at the setting sun — the M5 money shot */
   function spawnMarsSunset(): void {
+    landedPin = false;
     const sunward = new THREE.Vector3(-mars.posM.x, -mars.posM.y, -mars.posM.z).normalize();
     const tangent = new THREE.Vector3().crossVectors(sunward, new THREE.Vector3(0, 1, 0)).normalize();
     const r = mars.radiusM + 4000;
@@ -371,6 +399,7 @@ async function init(): Promise<void> {
 
   /** Earth low orbit, night side just past the terminator, nose at the rising sun limb */
   function spawnEarthSunrise(): void {
+    landedPin = false;
     const b = earthBody;
     const sunward = new THREE.Vector3(-b.posM.x, -b.posM.y, -b.posM.z).normalize();
     const east = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), sunward).normalize();
@@ -388,6 +417,43 @@ async function init(): Promise<void> {
     flight.prev.pos.copy(flight.curr.pos);
     flight.prev.quat.copy(flight.curr.quat);
     flight.prev.vel.copy(flight.curr.vel);
+  }
+
+  /**
+   * Boot spawn: parked on the pad at SpaceX Vandenberg SLC-4E, California
+   * (34.632°N, 120.611°W) — LANDED on real ETOPO Earth, gear down, co-rotating
+   * with the planet via the body-fixed pin. Lift off with R (or pitch up + W).
+   */
+  function spawnLaunchPad(): void {
+    const b = earthBody;
+    const lat = (34.632 * Math.PI) / 180, lon = (-120.611 * Math.PI) / 180;
+    const dirBody = new THREE.Vector3(
+      -Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon));
+    bodyOrientation(b, pinQuatBody, qScratch);
+    const up = dirBody.clone().applyQuaternion(pinQuatBody); // world radial
+    const terrain = terrains.find(t => t.body === b);
+    const r = (terrain ? terrain.surfaceRadiusAt(up) : b.radiusM) + 7.0; // gear plane
+    flight.curr.pos.set(b.posM.x + up.x * r, b.posM.y + up.y * r, b.posM.z + up.z * r);
+    // level attitude, nose WEST — the Pacific fills the windshield
+    const polar = new THREE.Vector3(0, 1, 0).applyQuaternion(pinQuatBody);
+    const east = new THREE.Vector3().crossVectors(polar, up).normalize();
+    const m = new THREE.Matrix4().lookAt(
+      flight.curr.pos,
+      new THREE.Vector3().copy(flight.curr.pos).addScaledVector(east, -1000),
+      up);
+    flight.curr.quat.setFromRotationMatrix(m);
+    flight.curr.vel.set(0, 0, 0);
+    flight.curr.omega.set(0, 0, 0);
+    flight.prev.pos.copy(flight.curr.pos);
+    flight.prev.quat.copy(flight.curr.quat);
+    flight.prev.vel.copy(flight.curr.vel);
+    flight.prev.omega.copy(flight.curr.omega);
+    // body-fixed pin (audit M7 mechanics): ride Earth's spin until liftoff
+    pinDirLocal.copy(dirBody);
+    pinDist = r;
+    pinQuatShip.copy(flight.curr.quat);
+    landedPin = true;
+    gearRequested = true;
   }
 
   /** dev (H): mountain overflight at 45 km — real-ETOPO showcase. Picks the
@@ -410,6 +476,7 @@ async function init(): Promise<void> {
       if (elev > bestElev) { bestElev = elev; bestUp = up; bestName = name; }
     }
     console.info(`[dev] mountain overflight: ${bestName} (sun elev ${bestElev.toFixed(2)})`);
+    landedPin = false;
     const up = bestUp;
     const r = b.radiusM + 45_000;
     flight.curr.pos.set(b.posM.x + up.x * r, b.posM.y + up.y * r, b.posM.z + up.z * r);
@@ -438,6 +505,7 @@ async function init(): Promise<void> {
   }
 
   function spawnAt(target: { x: number; y: number; z: number }, standoffM: number): void {
+    landedPin = false;
     const toSun = new THREE.Vector3(-target.x, -target.y, -target.z).normalize();
     flight.curr.pos.set(target.x, target.y, target.z).addScaledVector(toSun, standoffM);
     flight.curr.vel.set(0, 0, 0);
@@ -450,7 +518,6 @@ async function init(): Promise<void> {
     flight.prev.omega.copy(flight.curr.omega);
   }
 
-  if (loadGame()) bootStatus.textContent = 'Save restored…';
   renderer.domElement.addEventListener('click', () => void input.lock());
   window.addEventListener('resize', () => {
     rig.camera.aspect = window.innerWidth / window.innerHeight;
@@ -596,6 +663,16 @@ async function init(): Promise<void> {
     return best;
   }
 
+  // --- boot placement: THE GAME STARTS ON EARTH — parked at SpaceX
+  //     Vandenberg SLC-4E, California, on real ETOPO terrain. A saved game
+  //     (returning player) restores their position instead. Dev: K = back to
+  //     the pad, O = the old LEO Earth+Luna framing.
+  warp.target = luna; // pre-targeted: the Moon is the first destination
+  bootStatus.textContent = 'Loading Earth terrain (ETOPO 2022)…';
+  await (terrains.find(t => t.body === earthBody)?.ready ?? Promise.resolve());
+  spawnLaunchPad();
+  if (loadGame()) bootStatus.textContent = 'Save restored…';
+
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     const dtReal = Math.min((now - last) / 1000, 0.25);
@@ -649,6 +726,8 @@ async function init(): Promise<void> {
       if (intent.codes.has('Minus')) spawnMarsEntry();
       if (intent.codes.has('Equal')) spawnEarthSunrise();
       if (intent.codes.has('KeyH')) spawnHimalaya();
+      if (intent.codes.has('KeyK')) spawnLaunchPad();          // back to the pad
+      if (intent.codes.has('KeyO')) spawnEarthWithLuna();      // LEO framing
 
       // gear tap / autoland hold (N)
       if (intent.pressed.has('ship.gearToggle')) { gearRequested = !gearRequested; audio.event('gear'); }

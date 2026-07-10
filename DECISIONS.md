@@ -169,3 +169,12 @@ Player-reported after controls v2: at 250 m/s against a 1,274 km planet from 287
 - **Verified E2E:** spawn shows real Blue Marble Earth; dev key **H** = sun-aware mountain overflight (picks the lit range among Himalaya/Andes/Rockies/Alps/E-Africa/Karakoram); East Africa shot at 41 km AGL shows real Rift relief + lake; altimeter over the Himalayas reads terrain at ~5.4 km (real). 124 fps at 1,570 patches.
 - **Tier B (next, researched + verified 2026-07-09):** runtime close-up streaming from AWS Terrain Tiles terrarium (`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png`, z0–15, keyless, CORS `*`, decode h=(R·256+G+B/256)−32768; poles absent >85° — covered by the baked base). Fallback: `terrain.reearth.land` terrarium webp (Mapterhorn, keyless CORS). Pre-bake hero patches from Copernicus GLO-30 AWS bucket (no CORS — build-time only). Full research trail in the session workflow output.
 - DEM RAM note: 67 MB Int16 × (main + 2 workers) ≈ 200 MB — acceptable on desktop; revisit with SharedArrayBuffer/COOP-COEP or per-region tiling in Tier B.
+
+## Boot from Earth: SpaceX Vandenberg pad (2026-07-09)
+
+- **The game now starts LANDED on Earth** at SpaceX Vandenberg SLC-4E, California (34.632°N, 120.611°W) on the real ETOPO coastline: body-fixed pin (co-rotating), gear down, nose west at the Pacific, altAGL ~10 m. Boot awaits the Earth DEM (`PlanetTerrain.ready`) so the pin lands on final terrain. Saves still restore returning players; smoke runs use fresh contexts.
+- **Boot-epoch calibration:** spin phase was never GMST-calibrated, so boot scans +24 h in 20-min steps and picks the epoch whose spin puts morning sun (sin elev ≈ 0.55) over the pad — first impression is always lit; planets move imperceptibly within the window. (S6 will replace this with true GMST alignment.)
+- Teleport spawns (`spawnAt`, Earth/Mars demos, H/O keys) now release the landed pin — previously a pinned ship snapped back after any dev teleport.
+- Dev keys: **K** = back to the pad, **O** = old LEO Earth+Luna framing (E2E warp tests use it).
+- Smoke reworked: gates 'boot landed on the California pad' (pin + alt < 100 m) and 'liftoff climbs' (R for 12 s → >500 m, unpinned) replace 'thrust closes distance'. 12 gates total, all green; boost/moon E2E green via the O spawn.
+- Known cosmetic: faint grid-like shimmer over dark ocean at the terminator (suspect Black Marble emissive/TRAA interplay) — investigate with S2's dense-deck sky work.

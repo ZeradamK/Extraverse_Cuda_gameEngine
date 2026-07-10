@@ -43,6 +43,8 @@ export class PlanetTerrain {
   readonly group = new THREE.Group();
   heightField: HeightField; // swapped once the real DEM streams in
   active = false;
+  /** resolves once the height source is final (DEM loaded, or immediately) */
+  readonly ready: Promise<void>;
   /** true while a demUrl is declared but not yet loaded — patch builds hold */
   private demPending = false;
 
@@ -88,7 +90,7 @@ export class PlanetTerrain {
     }
     if (opts.demUrl && opts.demW && opts.demH) {
       this.demPending = true;
-      void loadDemGrid(opts.demUrl, opts.demW, opts.demH)
+      this.ready = loadDemGrid(opts.demUrl, opts.demW, opts.demH)
         .then(dem => {
           // swap the collision heightfield and arm every worker, THEN build
           this.heightField = createHeightField(kind, seed, opts.mask, dem);
@@ -102,6 +104,8 @@ export class PlanetTerrain {
           console.error(`DEM load failed for ${body.name} — procedural fallback`, err);
           this.demPending = false;
         });
+    } else {
+      this.ready = Promise.resolve();
     }
     const loader = new THREE.TextureLoader();
     const diff = loader.load('/textures/terrain/rock_diff.jpg');

@@ -32,18 +32,20 @@ try {
   await page.waitForTimeout(3000);
   await page.click('#app canvas');
 
-  // fps floor at spawn (LEO, terrain streaming)
+  // fps floor at spawn (LANDED at SpaceX Vandenberg — real ETOPO Earth)
   await page.waitForTimeout(2000);
   const s0 = await xv();
   check('fps ≥ 50 at spawn', s0.fps >= 50, `${s0.fps} fps`);
+  check('boot: landed on the California pad', s0.landedPin === true && s0.altAGL !== null && s0.altAGL < 100,
+    `pin=${s0.landedPin} alt=${s0.altAGL === null ? 'n/a' : s0.altAGL.toFixed(0) + ' m'}`);
 
-  // reachability: thrust toward Earth closes distance
-  const d0 = (await xv()).altAGL;
-  await page.keyboard.down('w');
-  await page.waitForTimeout(10_000);
-  await page.keyboard.up('w');
-  const d1 = (await xv()).altAGL;
-  check('thrust closes distance', d1 !== null && d0 !== null && d1 < d0 - 800, `${(d0/1e3).toFixed(1)}→${(d1/1e3).toFixed(1)} km`);
+  // liftoff: R (up-thrust) climbs off the pad through the real atmosphere
+  await page.keyboard.down('r');
+  await page.waitForTimeout(12_000);
+  await page.keyboard.up('r');
+  const s1 = await xv();
+  check('liftoff climbs', !s1.landedPin && s1.altAGL !== null && s1.altAGL > 500,
+    `alt ${s1.altAGL === null ? 'n/a' : (s1.altAGL / 1e3).toFixed(2) + ' km'}`);
 
   // M7 round-trip on Luna: land (autoland), exit, walk, board
   await page.keyboard.press('9');

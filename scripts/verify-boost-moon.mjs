@@ -32,6 +32,10 @@ try {
 
   const s0 = await xv();
   check('boot + Luna pre-targeted', s0.target === 'Luna', `target=${s0.target}`);
+  // game now boots LANDED at SpaceX Vandenberg — jump to the LEO framing (dev O)
+  // for the orbital warp/boost checks below
+  await page.keyboard.press('o');
+  await page.waitForTimeout(1500);
   await page.screenshot({ path: 'scripts/verify-spawn-earth-luna.png' });
 
   // warp to Luna from low Earth orbit (old code: permanently OBSTRUCTED here)
