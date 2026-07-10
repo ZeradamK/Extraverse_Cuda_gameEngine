@@ -1,0 +1,701 @@
+The bigger problem
+
+The real problem is not “making games faster.”
+
+The real problem is:
+
+We do not have an easy way to generate, test, evaluate, and train agents inside rich 3D environments.
+
+Game studios need this for:
+
+AI playtesting
+level balancing
+NPC behavior testing
+procedural world validation
+game mechanics tuning
+physics/collision bug discovery
+
+Robotics and physical-AI teams need this for:
+
+synthetic training environments
+robot navigation tasks
+manipulation tasks
+domain randomization
+sim-to-real preparation
+reward design
+embodied agent evaluation
+
+NVIDIA Isaac Sim is already positioned for robotics simulation, testing, and synthetic data generation, while Isaac Lab is a modular robot-learning framework for reinforcement learning, imitation learning, and motion planning.
+
+So you should not compete head-on with Isaac, Unity, or Unreal. You should build the missing layer above them:
+
+Prompt → 3D world → task/reward/sensors/actions → agent training/testing → export to engines/simulators.
+
+That is the company.
+
+Clear product direction
+
+Build:
+
+Extraverse RL Layer
+
+A platform that lets someone describe a 3D world or game scenario, then automatically turns it into an RL-ready environment.
+
+Example prompt:
+
+“Create a Mars rescue mission where a drone must land near a damaged rover, avoid dust storms, collect a battery cell, and return to base.”
+
+Your system creates:
+
+the 3D world
+physics objects
+terrain
+mission objective
+reward function
+reset conditions
+agent sensors
+action space
+success/failure metrics
+automated playtest agents
+exportable environment package
+
+That is the layer.
+
+Not just “generate a scene.”
+
+Generate a trainable world.
+
+The core architecture
+
+Think of your platform as a compiler.
+
+1. Prompt layer
+
+User describes a world:
+
+Build a warehouse robot task where a wheeled robot must navigate around shelves, avoid workers, pick up a box, and deliver it to a loading bay.
+
+The AI should not directly write random game code. It should convert the prompt into a structured intermediate representation.
+
+2. WorldSpec layer
+
+This is your most important product asset.
+
+WorldSpec {
+  scene: SceneSpec;
+  entities: EntitySpec[];
+  physics: PhysicsSpec;
+  agents: AgentSpec[];
+  tasks: TaskSpec[];
+  sensors: SensorSpec[];
+  actions: ActionSpec[];
+  rewards: RewardSpec[];
+  resets: ResetSpec[];
+  randomization: DomainRandomizationSpec;
+  metrics: EvaluationSpec;
+}
+
+This becomes your moat.
+
+Other tools may generate assets. Your tool generates worlds that agents can understand and train inside.
+
+3. Runtime layer
+
+You need multiple runtimes over time, but start narrow.
+
+First runtime:
+
+Browser/WebGPU runtime using EXTRAVERSE.
+
+Later runtimes:
+
+Unity adapter
+Unreal adapter
+Isaac Sim / Isaac Lab adapter
+Gymnasium-style RL adapter
+USD/glTF export
+
+Unity and Unreal are already building AI editor automation paths, including Unity AI tools and Unreal MCP. That means your product should integrate with them, not pretend they do not exist.
+
+4. Agent evaluation layer
+
+This is the magic.
+
+Agents should be able to:
+
+explore the generated world
+attempt objectives
+find broken paths
+detect impossible tasks
+measure difficulty
+report bugs
+suggest world changes
+improve level layout
+optimize reward functions
+
+For games, this becomes AI playtesting.
+
+For robotics, this becomes environment/task generation for policy training.
+
+5. Training/export layer
+
+For serious physical AI, do not try to run all RL training in the browser.
+
+The browser is your demo and design surface.
+
+Training should export to heavier systems like Isaac Lab, which is designed for robot learning workflows and high-performance simulation.
+
+Your role:
+
+Make environment creation 10x easier, then hand off training to the right backend.
+
+The product ladder
+
+You should build this in stages.
+
+Stage 1: AI 3D game/world generator
+
+This is your viral wedge.
+
+User says:
+
+“Create a drone obstacle course inside a ruined sci-fi city.”
+
+You generate:
+
+scene
+obstacles
+physics
+controls
+objective
+timer
+win/loss state
+
+This gets attention.
+
+Stage 2: AI playtester
+
+Now the generated world is not static.
+
+Agents play the level and produce a report:
+
+Result:
+- Agent completed objective 3/10 times.
+- Average completion time: 142 seconds.
+- Failure reason: gap between platforms too large.
+- Collision issue near checkpoint 4.
+- Suggested fix: reduce jump distance by 18%.
+
+This is where you become useful to game studios.
+
+Stage 3: RL environment compiler
+
+Now every world can become:
+
+env = extraverse.make("mars_rescue_drone_v1")
+obs = env.reset()
+action = policy(obs)
+obs, reward, done, info = env.step(action)
+
+This is where you become useful to AI researchers and robotics teams.
+
+Stage 4: Physical AI environment generation
+
+Now you support serious tasks:
+
+drone navigation
+warehouse robots
+humanoid room navigation
+robotic arm manipulation
+autonomous rover exploration
+disaster-response environments
+synthetic camera/depth/lidar data
+
+Isaac Sim also supports synthetic data generation workflows, so your advantage should be fast environment/task creation, not trying to replace its low-level simulator.
+
+Stage 5: Marketplace / dataset
+
+Eventually:
+
+“Worlds as training data.”
+
+Creators can publish:
+
+game levels
+robot tasks
+navigation benchmarks
+manipulation environments
+procedural scenario packs
+agent evaluation suites
+
+This becomes the platform.
+
+What to build first
+
+Do not start with a giant universal platform.
+
+Start with one killer vertical:
+
+Autonomous drone / rover environments
+
+This is the best first wedge because it connects games and physical AI.
+
+Why drone/rover first?
+
+Easier than humanoids
+Easier than robotic hands
+Works visually in browser
+Maps naturally to games
+Maps naturally to robotics
+Easy to define sensors/actions/rewards
+Great demo potential
+
+First demo:
+
+“Generate a Mars canyon drone rescue environment. The agent must fly through checkpoints, avoid terrain, land near a rover, collect a signal beacon, and return to base.”
+
+This gives you:
+
+3D world generation
+terrain
+physics
+navigation
+reward function
+reset conditions
+RL task
+visual demo
+game angle
+robotics angle
+
+That is perfect.
+
+MVP plan
+Month 1: Build the environment schema
+
+Your first job is not graphics. It is the WorldSpec + TaskSpec.
+
+Build:
+
+WorldSpec
+EntitySpec
+AgentSpec
+SensorSpec
+ActionSpec
+RewardSpec
+ResetSpec
+MetricSpec
+RandomizationSpec
+
+Example:
+
+AgentSpec {
+  id: "drone_01";
+  embodiment: "quadrotor";
+  sensors: ["rgb_camera", "depth", "imu", "position"];
+  actions: {
+    type: "continuous";
+    values: ["throttle", "pitch", "roll", "yaw"];
+  };
+}
+
+Reward example:
+
+RewardSpec {
+  success: "+100 if beacon delivered";
+  shaping: "+1 for progress toward target";
+  penalty: "-10 for collision";
+  penaltyTime: "-0.01 per second";
+}
+
+This schema is the brain of the company.
+
+Month 2: Build 3 generated environments
+
+Build only three, but make them beautiful and functional.
+
+Environment 1: Drone canyon
+drone starts at base
+must fly through rings
+avoid terrain
+land on pad
+reward based on progress, time, collisions
+Environment 2: Rover exploration
+rover explores alien terrain
+must find samples
+avoid cliffs
+return to base
+Environment 3: Game level playtest
+third-person character
+collect objective
+enemies or hazards
+exit gate
+AI agent tests if level is beatable
+
+These three cover your full thesis.
+
+Month 3: Build the agent evaluation system
+
+At first, do not train deep RL from scratch.
+
+Start with:
+
+scripted baseline agents
+pathfinding agents
+heuristic agents
+LLM planner + low-level controller
+simple RL only where useful
+
+Why? Because full RL training is slow and can distract you.
+
+Your early product should prove:
+
+“The agent can test and evaluate worlds.”
+
+Then later:
+
+“The agent can train policies.”
+
+Month 4: Add RL interface
+
+Create a clean API:
+
+import extraverse
+
+env = extraverse.load("drone_canyon_v1")
+obs = env.reset(seed=42)
+
+while True:
+    action = policy(obs)
+    obs, reward, done, info = env.step(action)
+    if done:
+        break
+
+Support:
+
+observations
+actions
+rewards
+resets
+domain randomization
+success metrics
+replay logs
+Month 5: Export to Isaac Lab or Unity
+
+Pick one serious export target first.
+
+My recommendation:
+
+First export: Isaac Lab
+
+Because your big thesis is physical AI.
+
+Isaac Lab is already built for robot learning, including RL and imitation learning, so exporting to it gives you instant credibility with robotics/AI people.
+
+Your pitch becomes:
+
+“We generate the environment, task, reward, and randomization config. Isaac Lab does the heavy training.”
+
+That is clean.
+
+Month 6: Build the full demo
+
+Your final demo should be:
+
+User describes a world.
+Extraverse generates the environment.
+Agent attempts the task.
+System finds failure points.
+User says: “Make it easier and add two hazards.”
+System edits the world.
+Agent succeeds.
+Export to Isaac Lab / Unity.
+
+That is the acquisition-grade demo.
+
+Your technical stack
+Frontend / visual engine
+
+Use your EXTRAVERSE WebGPU/three.js stack for the interactive demo.
+
+Purpose:
+
+fast browser experience
+shareable demos
+visual world editor
+quick iteration
+investor wow factor
+Backend
+
+Use:
+
+Python FastAPI for orchestration
+Node/TypeScript if your existing web engine needs it
+Postgres for world specs
+S3/R2 for assets
+Redis queue for jobs
+Python workers for RL/export jobs
+AI layer
+
+Use multiple agents:
+
+World designer agent
+
+Turns prompt into WorldSpec.
+
+Asset/layout agent
+
+Chooses terrain, objects, scene layout.
+
+Task designer agent
+
+Creates objectives, rewards, resets, metrics.
+
+Playtester agent
+
+Runs the world and detects issues.
+
+Patch agent
+
+Edits the WorldSpec based on failures.
+
+This is better than one giant agent.
+
+RL layer
+
+Start simple:
+
+scripted policies
+A* / navmesh agents
+PPO for drone/rover tasks
+domain randomization
+replay logging
+evaluation reports
+
+Later:
+
+imitation learning
+vision-language-action models
+multi-agent simulation
+sim-to-real transfer workflows
+What your moat should be
+
+You need to avoid being “just a wrapper.”
+
+Your moat should be five things:
+
+1. WorldSpec IR
+
+A structured language for 3D worlds, tasks, physics, agents, rewards, and metrics.
+
+2. Agent evaluation data
+
+Every generated world produces traces:
+
+failures
+completions
+collision points
+reward curves
+difficulty scores
+path heatmaps
+
+That data improves the platform.
+
+3. Engine adapters
+
+Export to:
+
+Web
+Unity
+Unreal
+Isaac Lab
+Gymnasium
+
+The adapter layer becomes very valuable.
+
+4. Procedural environment library
+
+You build reusable generators:
+
+warehouse
+canyon
+city
+space station
+alien planet
+obstacle course
+indoor room
+factory floor
+5. Task/reward library
+
+You build reusable embodied tasks:
+
+navigate to target
+pick and place
+avoid obstacles
+follow path
+search and rescue
+land safely
+inspect object
+cooperate with another agent
+
+This is where you become infrastructure.
+
+What not to do
+
+Avoid these traps:
+
+Do not build a full engine first
+
+You will get buried.
+
+Use your engine as the demo/runtime, but make the company about the RL/world layer.
+
+Do not start with humanoid robotics
+
+Too hard, too slow, too research-heavy.
+
+Start with drones, rovers, simple embodied agents.
+
+Do not focus only on visuals
+
+Pretty worlds are not enough.
+
+The key is:
+
+Can an agent act inside the world, receive observations, take actions, get rewards, and improve?
+
+Do not pitch “metaverse”
+
+Pitch:
+
+simulation infrastructure for agentic 3D worlds.
+
+Much stronger.
+
+The clean company plan
+Phase 1: Game-design wedge
+
+Build a browser product where creators generate playable 3D game scenarios.
+
+Target users:
+
+indie game devs
+Roblox/Unity creators
+game jam builders
+prototype studios
+AI creators
+
+Value:
+
+“Generate a playable 3D prototype in minutes.”
+
+Phase 2: AI playtesting
+
+Add automated agents that test levels.
+
+Target users:
+
+game studios
+QA teams
+UGC platforms
+simulation teams
+
+Value:
+
+“Find broken levels, impossible missions, bad NPC behavior, and poor balance automatically.”
+
+Phase 3: RL environment generation
+
+Turn every world into a trainable environment.
+
+Target users:
+
+robotics labs
+embodied AI teams
+drone companies
+warehouse automation teams
+university labs
+
+Value:
+
+“Generate thousands of diverse environments for training and evaluation.”
+
+Phase 4: Physical AI platform
+
+Export to Isaac Lab / Isaac Sim and other simulation stacks.
+
+Target users:
+
+robotics companies
+autonomous systems teams
+synthetic data teams
+defense/disaster-response simulation
+industrial automation
+
+Value:
+
+“Create and randomize realistic training environments without manually building every scene.”
+
+The positioning
+
+Use this:
+
+Extraverse is an RL environment layer for 3D worlds. It turns natural language into interactive environments with physics, agents, objectives, rewards, sensors, actions, and evaluation metrics. Creators can generate playable game worlds, run AI agents through them, detect broken mechanics, improve the design, and export the same world as a trainable simulation environment for robotics and physical AI.
+
+Even sharper:
+
+We are building the simulation layer for agentic 3D worlds: prompt-to-world generation, automated playtesting, and RL-ready environments for games, robotics, and physical AI.
+
+The first demo you should build
+
+Build this exact demo:
+
+“Mars Drone Rescue”
+
+User prompt:
+
+“Create a Mars rescue mission where a drone must fly through a canyon, avoid rock formations, land near a damaged rover, scan it, collect a beacon, and return to base before a dust storm arrives.”
+
+The generated environment includes:
+
+Mars terrain
+canyon layout
+drone controller
+damaged rover
+landing pad
+wind/dust hazard
+objective markers
+reward function
+reset conditions
+success metrics
+automated test agent
+heatmap of failed attempts
+
+Agent report:
+
+The agent completed the mission 6/20 times.
+Main failure: collision near canyon turn 3.
+Suggested fix: widen canyon by 22% or reduce wind turbulence.
+Average reward: 64.2
+Success threshold: 80
+
+Then user says:
+
+“Make it easier and add a second route.”
+
+System patches the environment.
+
+That demo explains the whole company.
+
+Final recommendation
+
+Your best path is:
+
+Build Extraverse as a browser-based 3D world runtime, but make the startup an RL environment compiler for games and physical AI.
+
+The key product is not the engine.
+
+The key product is:
+
+Prompt → WorldSpec → 3D Environment → Agent Task → Reward Function → Evaluation → Export
+
+That is the layer that could become valuable enough for a major engine, robotics, or AI company to acquire.
